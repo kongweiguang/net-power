@@ -614,8 +614,7 @@ mod platform {
             "gsettings",
             ["get", "org.gnome.system.proxy.http", "host"],
         ))
-        .map(|value| parse_gsettings_string(&value))
-        .map_err(linux_proxy_error)?;
+        .map(|value| parse_gsettings_string(&value))?;
         let port = run_command(&CommandSpec::new(
             "gsettings",
             ["get", "org.gnome.system.proxy.http", "port"],

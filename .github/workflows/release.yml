@@ -27,7 +27,7 @@ jobs:
             args: --target aarch64-apple-darwin --bundles app,dmg
             rust-target: aarch64-apple-darwin
           - label: macOS Intel
-            platform: macos-latest
+            platform: macos-15-intel
             args: --target x86_64-apple-darwin --bundles app,dmg
             rust-target: x86_64-apple-darwin
           - label: Linux x64 AppImage and DEB
