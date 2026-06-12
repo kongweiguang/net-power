@@ -1,0 +1,42 @@
+{
+  "name": "net-power",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:visual": "playwright test",
+    "verify:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-release-smoke.ps1",
+    "verify:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-installer-smoke.ps1",
+    "verify:webview": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-webview-smoke.ps1",
+    "verify:tray": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-tray-smoke.ps1",
+    "verify:smoke": "npm run verify:release && npm run verify:webview && npm run verify:tray && npm run verify:installer"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2",
+    "lucide-react": "^1.17.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^4.1.8"
+  }
+}
