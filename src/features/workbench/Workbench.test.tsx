@@ -6,6 +6,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import packageJson from "../../../package.json";
 import type {
   AppSetting,
   AutostartStatus,
@@ -20,6 +21,8 @@ import type {
   ToolServiceSummary,
 } from "../../types";
 import { Workbench } from "./Workbench";
+
+const appVersion = packageJson.version;
 
 const apiMocks = vi.hoisted(() => ({
   settingsList: vi.fn(),
@@ -794,7 +797,7 @@ describe("Workbench", () => {
     expect(within(panel).queryByRole("heading", { name: "运行快照" })).not.toBeInTheDocument();
     expect(within(panel).queryByRole("navigation", { name: "设置分类导航" })).not.toBeInTheDocument();
     expect(within(panel).getByRole("heading", { name: "关于" })).toBeInTheDocument();
-    expect(within(panel).getByText("0.1.0")).toBeInTheDocument();
+    expect(within(panel).getByText(appVersion)).toBeInTheDocument();
     expect(within(panel).getByRole("link", { name: "github.com/kongweiguang/net-power" })).toHaveAttribute(
       "href",
       "https://github.com/kongweiguang/net-power",
