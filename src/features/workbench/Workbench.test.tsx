@@ -55,6 +55,7 @@ const apiMocks = vi.hoisted(() => ({
   sshUpdate: vi.fn(),
   sshDelete: vi.fn(),
   sshTest: vi.fn(),
+  sshOpenTerminal: vi.fn(),
   logsList: vi.fn(),
   logsClear: vi.fn(),
   networkGetLanIp: vi.fn(),
@@ -114,6 +115,7 @@ vi.mock("../../api", () => ({
     update: apiMocks.sshUpdate,
     delete: apiMocks.sshDelete,
     test: apiMocks.sshTest,
+    openTerminal: apiMocks.sshOpenTerminal,
   },
   logsApi: {
     list: apiMocks.logsList,
@@ -298,6 +300,20 @@ describe("Workbench", () => {
     }
     await user.click(within(knownHostsPicker as HTMLElement).getByRole("button", { name: "选择" }));
     await waitFor(() => expect(apiMocks.fileDialogChooseFile).toHaveBeenCalledTimes(2));
+  });
+
+  it("opens an SSH profile in the system terminal", async () => {
+    const user = userEvent.setup();
+    mockApis({ profiles: [sshProfile()] });
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "SSH" }));
+    await user.click(await screen.findByTitle("打开终端"));
+
+    await waitFor(() => expect(apiMocks.sshOpenTerminal).toHaveBeenCalledWith("ssh-1"));
+    expect(await screen.findByText("已打开系统终端")).toBeInTheDocument();
   });
 
   it("creates an SSH SOCKS5 service without target host and port", async () => {
@@ -985,6 +1001,7 @@ function mockApis({
   apiMocks.sshUpdate.mockResolvedValue(sshProfile());
   apiMocks.sshDelete.mockResolvedValue(undefined);
   apiMocks.sshTest.mockResolvedValue({ ok: true, message: "ok", durationMs: 1 });
+  apiMocks.sshOpenTerminal.mockResolvedValue("已请求系统终端连接 deploy@prod.example.com:22。");
   apiMocks.logsList.mockResolvedValue(logs);
   apiMocks.logsClear.mockResolvedValue(undefined);
   apiMocks.networkGetLanIp.mockResolvedValue("192.168.1.23");

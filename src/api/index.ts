@@ -147,6 +147,8 @@ export const sshProfilesApi = {
   delete: (id: string) => call<void>("delete_ssh_profile", { id }),
   /** 测试 SSH Profile。 */
   test: (id: string) => call<TestResult>("test_ssh_profile", { id }),
+  /** 在系统终端中打开 SSH Profile。 */
+  openTerminal: (id: string) => call<string>("open_ssh_terminal", { id }),
 };
 
 /** 日志 API。 */

@@ -114,6 +114,7 @@ pub fn run() {
             commands::update_ssh_profile,
             commands::delete_ssh_profile,
             commands::test_ssh_profile,
+            commands::open_ssh_terminal,
             commands::list_logs,
             commands::clear_logs,
             commands::list_system_proxy_profiles,

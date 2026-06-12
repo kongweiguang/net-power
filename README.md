@@ -12,7 +12,7 @@ net-power 是一个跨平台桌面代理管理工具，基于 Rust、Tauri 和 R
 - HTTP 代理：支持 reverse proxy、forward proxy、HTTPS CONNECT、Header 规则和 Body rewrite。
 - TCP/UDP 转发：支持常见端口转发场景。
 - 转发工作台：统一管理 HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 配置，支持本地或局域网启动范围和一键复制访问地址。
-- SSH 转发：支持本地转发、远程转发、SOCKS5 动态代理、跳板机、多级跳板和自动重连。
+- SSH 转发：支持本地转发、远程转发、SOCKS5 动态代理、跳板机、多级跳板、自动重连，以及从 SSH Profile 打开系统终端。
 - 系统代理：支持 Windows、macOS、Linux 的代理设置、清理和状态读取。
 - 配置持久化：使用 SQLite 保存服务配置、设置和运行数据，默认位于 `~/.net-power/proxy-tool.db`。
 - 运行日志：按服务查看连接、状态、耗时、字节和结构化 meta 信息。

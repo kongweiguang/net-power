@@ -101,6 +101,7 @@ Rust command 和 database 层会重新校验前端输入：
 - 多级跳板会对每一跳分别执行 known_hosts 校验和认证；跳板链只保存 Profile id，不复制密码或 passphrase 明文。
 - SSH remote forward 断线后自动重连，重连失败只写入摘要错误和退避时间，不记录 secret 或完整私钥路径。
 - SSH SOCKS5 当前仅支持 no-auth + CONNECT，不在 SOCKS 层额外保存用户名、密码或目标请求体。
+- SSH Profile 的外部终端入口只接受 Profile id，Rust 侧从 SQLite 读取结构化配置并调用本机 `ssh` 客户端；保存的密码和 passphrase 不会作为命令行参数或环境变量传给外部进程。
 
 ## 日志与隐私
 

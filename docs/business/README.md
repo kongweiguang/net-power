@@ -23,6 +23,7 @@
 - SSH 跳板机/多级跳板：SSH Profile 可选择另一个 Profile 作为跳板，运行时按引用链逐跳认证并建立最终隧道。
 - SSH remote 自动重连：远程监听 session 断开后自动按指数退避重连；用户停止服务会取消重连。
 - SSH 认证测试：执行真实 SSH 握手、known_hosts 校验和认证。
+- SSH 外部终端：SSH Profile 行可打开系统终端并调用本机 `ssh` 客户端，密码和 passphrase 不会从 net-power 传给外部进程。
 
 ## System Proxy
 

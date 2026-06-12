@@ -21,6 +21,7 @@ import {
   Plus,
   RotateCcw,
   Save,
+  TerminalSquare,
   Trash2,
 } from "lucide-react";
 import type { ServiceKind, ServiceSummary, SshAuthType, SshProfile, SystemProxyStatus, ToolServiceSummary } from "../../types";
@@ -669,7 +670,7 @@ interface SshPageProps {
   onServiceCopyAddress: (service: ServiceSummary) => void;
   onServiceEdit: (id: string) => void;
   onServiceLogs: (service: ServiceSummary) => void;
-  onSshAction: (id: string, action: "test" | "delete" | "edit") => void;
+  onSshAction: (id: string, action: "test" | "delete" | "edit" | "terminal") => void;
   onChoosePrivateKey: () => void;
   onChooseKnownHosts: () => void;
 }
@@ -1271,7 +1272,7 @@ function SshProfileForm({ profiles, editingProfileId, draft, busy, editing, onDr
 interface SshProfileListProps {
   profiles: SshProfile[];
   busy: string | null;
-  onAction: (id: string, action: "test" | "delete" | "edit") => void;
+  onAction: (id: string, action: "test" | "delete" | "edit" | "terminal") => void;
 }
 
 function SshProfileList({ profiles, busy, onAction }: SshProfileListProps) {
@@ -1288,6 +1289,7 @@ function SshProfileList({ profiles, busy, onAction }: SshProfileListProps) {
           </div>
           <div className="icon-row ssh-profile-actions action-row">
             <IconButton title="测试 SSH" busy={busy === `test-ssh:${profile.id}`} onClick={() => onAction(profile.id, "test")}><CheckCircle2 size={15} /></IconButton>
+            <IconButton title="打开终端" busy={busy === `terminal-ssh:${profile.id}`} onClick={() => onAction(profile.id, "terminal")}><TerminalSquare size={15} /></IconButton>
             <IconButton title="编辑 SSH" busy={busy === `edit-ssh:${profile.id}`} onClick={() => onAction(profile.id, "edit")}><Pencil size={15} /></IconButton>
             <MoreActionMenu
               actions={[

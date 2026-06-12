@@ -544,7 +544,7 @@ export function Workbench() {
     }
   }
 
-  async function sshAction(id: string, action: "test" | "delete" | "edit") {
+  async function sshAction(id: string, action: "test" | "delete" | "edit" | "terminal") {
     if (action === "edit") {
       const profile = await sshProfilesApi.get(id);
       if (!profile) {
@@ -562,6 +562,9 @@ export function Workbench() {
       if (action === "test") {
         const result = await sshProfilesApi.test(id);
         toast(result.ok ? "success" : "error", result.ok ? "SSH 测试通过" : "SSH 测试失败", result.message);
+      } else if (action === "terminal") {
+        const message = await sshProfilesApi.openTerminal(id);
+        toast("success", "已打开系统终端", message);
       } else {
         await sshProfilesApi.delete(id);
         toast("success", "SSH 配置已删除");

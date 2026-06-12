@@ -104,6 +104,9 @@ export function localFallback<T>(
       durationMs: 0,
     } as T);
   }
+  if (command === "open_ssh_terminal") {
+    return Promise.reject(new Error("打开外部终端需要在 Tauri 桌面环境中执行。"));
+  }
   if (command === "get_service") {
     return Promise.reject(new Error(`浏览器预览模式无法读取服务详情: ${id}`));
   }

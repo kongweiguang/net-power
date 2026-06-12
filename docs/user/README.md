@@ -190,6 +190,12 @@ flowchart LR
 
 适合场景：你不想为每个远端服务单独建 SSH Local，而是让浏览器或工具通过一个 SOCKS5 入口动态访问多个目标。目标地址由客户端每次 CONNECT 时决定。
 
+### SSH Terminal：用系统终端登录 SSH Profile
+
+SSH Profile 列表行提供“打开终端”操作。点击后 net-power 会在 Rust 侧读取该 Profile，按主机、端口、用户名、私钥路径、known_hosts 策略和跳板链组装本机 `ssh` 参数，再打开系统终端执行连接。
+
+密码和私钥 passphrase 仍只保存在 net-power 的加密存储里，不会传给外部终端；如果该 Profile 使用密码或带口令私钥，系统 `ssh` 会在终端里自行提示输入。
+
 ### System Proxy：让系统应用自动走某个代理地址
 
 ```mermaid

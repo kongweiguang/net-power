@@ -14,12 +14,12 @@ export default defineConfig({
   reporter: "list",
   webServer: {
     command: "npm run dev -- --host 127.0.0.1",
-    url: "http://127.0.0.1:1420",
+    url: "http://127.0.0.1:1422",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
   use: {
-    baseURL: "http://127.0.0.1:1420",
+    baseURL: "http://127.0.0.1:1422",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },

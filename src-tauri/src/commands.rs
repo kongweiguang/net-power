@@ -7,12 +7,14 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     AppSetting, AutostartStatus, CreateServiceInput, LogFilter, LogRow, RuntimeStatus,
     ServiceDetail, ServiceKind, ServiceRuntimeSummary, ServiceSummary, SshProfile, SshProfileInput,
-    SystemInfo, SystemProxyProfile, SystemProxyProfileInput, SystemProxyStatus, SystemProxyTarget,
-    TestResult, ToolServiceConfig, ToolServiceInput, ToolServiceSummary,
+    SshProfileRuntimeConfig, SystemInfo, SystemProxyProfile, SystemProxyProfileInput,
+    SystemProxyStatus, SystemProxyTarget, TestResult, ToolServiceConfig, ToolServiceInput,
+    ToolServiceSummary,
 };
 use crate::proxy;
 use crate::system_proxy;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, State};
@@ -435,6 +437,29 @@ pub async fn test_ssh_profile(
         .map_err(String::from)
 }
 
+/// 使用本机 OpenSSH 客户端在系统终端中打开 SSH Profile。
+#[tauri::command]
+pub fn open_ssh_terminal(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    let profile_id = id.trim();
+    if profile_id.is_empty() {
+        return Err("SSH Profile 不能为空".to_string());
+    }
+
+    let chain = state
+        .db
+        .resolve_ssh_profile_runtime_chain(profile_id)
+        .map_err(String::from)?;
+    let args = ssh_terminal_args(&chain).map_err(String::from)?;
+    launch_ssh_terminal(&args).map_err(String::from)?;
+    let target = chain
+        .last()
+        .ok_or_else(|| "SSH 连接链不能为空".to_string())?;
+    Ok(format!(
+        "已请求系统终端连接 {}@{}:{}。",
+        target.username, target.host, target.port
+    ))
+}
+
 /// 查询日志。
 #[tauri::command]
 pub fn list_logs(state: State<'_, AppState>, filter: LogFilter) -> Result<Vec<LogRow>, String> {
@@ -625,6 +650,244 @@ fn is_usable_lan_ipv4(ip: Ipv4Addr) -> bool {
         && !ip.is_link_local()
 }
 
+fn ssh_terminal_args(chain: &[SshProfileRuntimeConfig]) -> AppResult<Vec<String>> {
+    let target = chain
+        .last()
+        .ok_or_else(|| AppError::InvalidInput("SSH 连接链不能为空".to_string()))?;
+    let mut args = Vec::new();
+
+    args.push("-p".to_string());
+    args.push(target.port.to_string());
+    append_known_hosts_options(&mut args, target)?;
+
+    if target.connect_timeout_ms > 0 {
+        append_ssh_option(
+            &mut args,
+            "ConnectTimeout",
+            &millis_to_ssh_seconds(target.connect_timeout_ms).to_string(),
+        );
+    }
+    if target.keepalive_interval_ms > 0 {
+        append_ssh_option(
+            &mut args,
+            "ServerAliveInterval",
+            &millis_to_ssh_seconds(target.keepalive_interval_ms).to_string(),
+        );
+    }
+
+    for profile in chain {
+        if let Some(path) = non_empty(profile.private_key_path.as_deref()) {
+            args.push("-i".to_string());
+            args.push(path.to_string());
+        }
+    }
+
+    if chain.len() > 1 {
+        let jumps = chain[..chain.len() - 1]
+            .iter()
+            .map(ssh_jump_destination)
+            .collect::<AppResult<Vec<_>>>()?
+            .join(",");
+        args.push("-J".to_string());
+        args.push(jumps);
+    }
+
+    args.push(ssh_user_host_destination(target)?);
+    Ok(args)
+}
+
+fn append_known_hosts_options(
+    args: &mut Vec<String>,
+    profile: &SshProfileRuntimeConfig,
+) -> AppResult<()> {
+    let mode = match profile.known_hosts_mode.as_str() {
+        "strict" => "yes",
+        "accept_new" => "accept-new",
+        "insecure_skip" => "no",
+        value => {
+            return Err(AppError::InvalidInput(format!(
+                "未知 known_hosts 校验模式: {value}"
+            )));
+        }
+    };
+    append_ssh_option(args, "StrictHostKeyChecking", mode);
+    if let Some(path) = non_empty(profile.known_hosts_path.as_deref()) {
+        append_ssh_option(args, "UserKnownHostsFile", path);
+    }
+    Ok(())
+}
+
+fn append_ssh_option(args: &mut Vec<String>, key: &str, value: &str) {
+    args.push("-o".to_string());
+    args.push(format!("{key}={value}"));
+}
+
+fn millis_to_ssh_seconds(value: u64) -> u64 {
+    value.saturating_add(999).saturating_div(1000).max(1)
+}
+
+fn ssh_jump_destination(profile: &SshProfileRuntimeConfig) -> AppResult<String> {
+    Ok(format!(
+        "{}:{}",
+        ssh_user_host_destination(profile)?,
+        profile.port
+    ))
+}
+
+fn ssh_user_host_destination(profile: &SshProfileRuntimeConfig) -> AppResult<String> {
+    let username = profile.username.trim();
+    let host = profile.host.trim();
+    if username.is_empty() {
+        return Err(AppError::InvalidInput("SSH 用户名不能为空".to_string()));
+    }
+    if host.is_empty() {
+        return Err(AppError::InvalidInput("SSH 主机不能为空".to_string()));
+    }
+    Ok(format!("{username}@{}", ssh_host_for_destination(host)))
+}
+
+fn ssh_host_for_destination(host: &str) -> String {
+    if host.contains(':') && !(host.starts_with('[') && host.ends_with(']')) {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn spawn_program(program: &str, args: &[String]) -> std::io::Result<()> {
+    Command::new(program).args(args).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "windows")]
+fn launch_ssh_terminal(ssh_args: &[String]) -> AppResult<()> {
+    let mut wt_args = vec!["ssh".to_string()];
+    wt_args.extend(ssh_args.iter().cloned());
+    if spawn_program("wt.exe", &wt_args).is_ok() {
+        return Ok(());
+    }
+
+    // 这里的目标是打开可见终端窗口，不能使用 CREATE_NO_WINDOW。
+    let powershell_args = vec![
+        "-NoExit".to_string(),
+        "-ExecutionPolicy".to_string(),
+        "Bypass".to_string(),
+        "-Command".to_string(),
+        powershell_ssh_command(ssh_args),
+    ];
+    spawn_program("powershell.exe", &powershell_args).map_err(AppError::Io)
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_ssh_command(ssh_args: &[String]) -> String {
+    let mut parts = vec!["&".to_string(), powershell_quote("ssh")];
+    parts.extend(ssh_args.iter().map(|arg| powershell_quote(arg)));
+    parts.join(" ")
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(target_os = "macos")]
+fn launch_ssh_terminal(ssh_args: &[String]) -> AppResult<()> {
+    let command_line = posix_shell_command("ssh", ssh_args);
+    let args = vec![
+        "-e".to_string(),
+        format!(
+            "tell application \"Terminal\" to do script {}",
+            apple_script_quote(&command_line)
+        ),
+        "-e".to_string(),
+        "tell application \"Terminal\" to activate".to_string(),
+    ];
+    spawn_program("osascript", &args).map_err(AppError::Io)
+}
+
+#[cfg(target_os = "macos")]
+fn apple_script_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn launch_ssh_terminal(ssh_args: &[String]) -> AppResult<()> {
+    let mut candidates = Vec::new();
+    if let Some(terminal) = std::env::var_os("TERMINAL").and_then(|value| value.into_string().ok())
+    {
+        candidates.push((terminal, terminal_e_args(ssh_args)));
+    }
+    candidates.extend([
+        ("x-terminal-emulator".to_string(), terminal_e_args(ssh_args)),
+        (
+            "gnome-terminal".to_string(),
+            terminal_dash_dash_args(ssh_args),
+        ),
+        ("kgx".to_string(), terminal_dash_dash_args(ssh_args)),
+        ("konsole".to_string(), terminal_e_args(ssh_args)),
+        (
+            "xfce4-terminal".to_string(),
+            vec![
+                "--command".to_string(),
+                posix_shell_command("ssh", ssh_args),
+            ],
+        ),
+        ("xterm".to_string(), terminal_e_args(ssh_args)),
+    ]);
+
+    let mut errors = Vec::new();
+    for (program, args) in candidates {
+        match spawn_program(&program, &args) {
+            Ok(()) => return Ok(()),
+            Err(err) => errors.push(format!("{program}: {err}")),
+        }
+    }
+
+    Err(AppError::Unsupported(format!(
+        "找不到可用的 Linux 终端模拟器，请安装 x-terminal-emulator、gnome-terminal、konsole、xfce4-terminal 或 xterm。{}",
+        errors.join("; ")
+    )))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn terminal_e_args(ssh_args: &[String]) -> Vec<String> {
+    let mut args = vec!["-e".to_string(), "ssh".to_string()];
+    args.extend(ssh_args.iter().cloned());
+    args
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn terminal_dash_dash_args(ssh_args: &[String]) -> Vec<String> {
+    let mut args = vec!["--".to_string(), "ssh".to_string()];
+    args.extend(ssh_args.iter().cloned());
+    args
+}
+
+#[cfg(unix)]
+fn posix_shell_command(program: &str, args: &[String]) -> String {
+    let mut parts = vec![posix_shell_quote(program)];
+    parts.extend(args.iter().map(|arg| posix_shell_quote(arg)));
+    parts.join(" ")
+}
+
+#[cfg(unix)]
+fn posix_shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(not(any(target_os = "windows", unix)))]
+fn launch_ssh_terminal(_ssh_args: &[String]) -> AppResult<()> {
+    Err(AppError::Unsupported(
+        "当前平台暂不支持打开外部 SSH 终端".to_string(),
+    ))
+}
+
 async fn run_test<F, Fut>(f: F) -> AppResult<TestResult>
 where
     F: FnOnce() -> Fut,
@@ -723,6 +986,30 @@ async fn stop_service_for_command(
 mod tests {
     use super::*;
 
+    fn ssh_runtime_profile(
+        id: &str,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> SshProfileRuntimeConfig {
+        SshProfileRuntimeConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            host: host.to_string(),
+            port,
+            username: username.to_string(),
+            auth_type: crate::models::SshAuthType::Agent,
+            password_secret_id: None,
+            private_key_path: None,
+            private_key_passphrase_secret_id: None,
+            known_hosts_mode: "accept_new".to_string(),
+            known_hosts_path: None,
+            connect_timeout_ms: 10_000,
+            keepalive_interval_ms: 30_000,
+            jump_profile_id: None,
+        }
+    }
+
     #[test]
     fn choose_lan_ipv4_prefers_private_addresses() {
         let ip = choose_lan_ipv4([
@@ -744,5 +1031,67 @@ mod tests {
         ]);
 
         assert_eq!(ip, Some(Ipv4Addr::new(10, 10, 0, 2)));
+    }
+
+    #[test]
+    fn ssh_terminal_args_builds_direct_profile_command() {
+        let mut profile = ssh_runtime_profile("prod", "prod.example.com", 2222, "deploy");
+        profile.private_key_path = Some("C:/Users/test/.ssh/id_ed25519".to_string());
+        profile.known_hosts_mode = "strict".to_string();
+        profile.known_hosts_path = Some("C:/Users/test/.ssh/known_hosts".to_string());
+
+        let args = ssh_terminal_args(&[profile]).expect("SSH 参数应生成成功");
+
+        assert_eq!(
+            args,
+            vec![
+                "-p",
+                "2222",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "UserKnownHostsFile=C:/Users/test/.ssh/known_hosts",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ServerAliveInterval=30",
+                "-i",
+                "C:/Users/test/.ssh/id_ed25519",
+                "deploy@prod.example.com",
+            ]
+        );
+    }
+
+    #[test]
+    fn ssh_terminal_args_builds_proxy_jump_chain() {
+        let mut jump = ssh_runtime_profile("jump", "bastion.example.com", 2200, "ops");
+        jump.private_key_path = Some("/home/me/.ssh/jump".to_string());
+        let mut target = ssh_runtime_profile("target", "app.internal", 22, "deploy");
+        target.private_key_path = Some("/home/me/.ssh/app".to_string());
+
+        let args = ssh_terminal_args(&[jump, target]).expect("跳板 SSH 参数应生成成功");
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-J", "ops@bastion.example.com:2200"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-i", "/home/me/.ssh/jump"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-i", "/home/me/.ssh/app"]));
+        assert_eq!(args.last().map(String::as_str), Some("deploy@app.internal"));
+    }
+
+    #[test]
+    fn ssh_terminal_args_brackets_ipv6_hosts() {
+        let profile = ssh_runtime_profile("ipv6", "2001:db8::1", 22, "deploy");
+
+        let args = ssh_terminal_args(&[profile]).expect("IPv6 SSH 参数应生成成功");
+
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("deploy@[2001:db8::1]")
+        );
     }
 }
