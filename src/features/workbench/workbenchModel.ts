@@ -13,16 +13,58 @@ import type {
   SshAuthType,
   SshProfile,
   SshProfileInput,
+  ToolServiceContentSource,
+  ToolServiceInput,
+  ToolServiceRouteInput,
 } from "../../types";
+
+/** 工具 HTTP 服务支持的方法。 */
+export type ToolServiceMethod = ToolServiceRouteInput["method"];
 
 /** Workbench 导航页签。 */
 export type PageKey =
   | "dashboard"
-  | "http"
+  | "services"
   | "forwarding"
   | "ssh"
   | "system"
   | "settings";
+
+/** 本地工具服务表单草稿。 */
+export interface ToolServiceDraft {
+  /** 用户可读服务名。 */
+  name: string;
+  /** 监听主机。 */
+  host: string;
+  /** 监听端口，表单内以字符串保存。 */
+  port: string;
+  /** 静态目录路径。 */
+  staticRootDir: string;
+  /** 静态目录挂载路径前缀。 */
+  staticPathPrefix: string;
+  /** 接口路由草稿。 */
+  routes: ToolServiceRouteDraft[];
+}
+
+/** 本地工具 HTTP 服务接口路由草稿。 */
+export interface ToolServiceRouteDraft {
+  /** 前端稳定 key。 */
+  id: string;
+  /** HTTP 方法。 */
+  method: ToolServiceMethod;
+  /** 精确匹配的请求路径。 */
+  path: string;
+  /** 响应状态码，表单内以字符串保存。 */
+  responseStatus: string;
+  /** 响应 Content-Type。 */
+  contentType: string;
+  /** 响应体来源。 */
+  contentSource: ToolServiceContentSource;
+  /** 手写响应体。 */
+  body: string;
+  /** 响应文件路径。 */
+  filePath: string;
+}
 
 /** 服务表单草稿。 */
 export interface ServiceDraft {
@@ -111,6 +153,24 @@ export const kindLabels: Record<ServiceKind, string> = {
   ssh_socks: "SSH SOCKS5 动态代理",
 };
 
+/** 工具 HTTP 服务方法展示名。 */
+export const toolServiceMethodLabels: Record<ToolServiceMethod, string> = {
+  GET: "GET",
+  POST: "POST",
+  PUT: "PUT",
+  PATCH: "PATCH",
+  DELETE: "DELETE",
+  HEAD: "HEAD",
+  OPTIONS: "OPTIONS",
+  ANY: "ANY",
+};
+
+/** 工具 HTTP 服务响应来源展示名。 */
+export const toolServiceContentSourceLabels: Record<ToolServiceContentSource, string> = {
+  inline: "手写内容",
+  file: "选择文件",
+};
+
 /** 默认服务草稿。 */
 export const defaultServiceDraft: ServiceDraft = {
   name: "",
@@ -133,6 +193,28 @@ export const defaultServiceDraft: ServiceDraft = {
   headerRules: [],
   bodyRewriteRules: [],
   notes: "",
+};
+
+/** 默认本地工具服务接口路由草稿。 */
+export const defaultToolServiceRouteDraft: ToolServiceRouteDraft = {
+  id: "route-1",
+  method: "GET",
+  path: "/api/hello",
+  responseStatus: "200",
+  contentType: "application/json; charset=utf-8",
+  contentSource: "inline",
+  body: "{\n  \"ok\": true\n}",
+  filePath: "",
+};
+
+/** 默认本地工具服务草稿。 */
+export const defaultToolServiceDraft: ToolServiceDraft = {
+  name: "本地 HTTP 服务",
+  host: "127.0.0.1",
+  port: "18080",
+  staticRootDir: "",
+  staticPathPrefix: "/",
+  routes: [defaultToolServiceRouteDraft],
 };
 
 /** 默认 SSH 配置草稿。 */
@@ -320,6 +402,25 @@ export function parseSshDraft(draft: SshDraft): SshProfileInput | string {
   };
 }
 
+/** 把本地工具服务表单转换为后端启动输入；返回字符串表示用户可见校验错误。 */
+export function parseToolServiceDraft(draft: ToolServiceDraft): ToolServiceInput | string {
+  if (!draft.name.trim()) return "服务名称不能为空。";
+  const port = parsePort(draft.port);
+  if (!port) return "监听端口必须是 1-65535。";
+  const staticRootDir = draft.staticRootDir.trim();
+  const routes = normalizeToolServiceRoutes(draft.routes);
+  if (typeof routes === "string") return routes;
+  if (!staticRootDir && routes.length === 0) return "请至少配置静态目录或一个接口。";
+  return {
+    name: draft.name.trim(),
+    host: draft.host.trim() || "127.0.0.1",
+    port,
+    staticRootDir: staticRootDir || null,
+    staticPathPrefix: normalizeHttpPath(draft.staticPathPrefix),
+    routes,
+  };
+}
+
 /** 把后端服务详情回填到编辑表单。 */
 export function serviceDetailToDraft(detail: ServiceDetail): ServiceDraft {
   const remoteBindHost =
@@ -390,11 +491,14 @@ export function sshProfileToDraft(profile: SshProfile): SshDraft {
 
 /** 按当前页面筛选服务列表。 */
 export function filterServicesByPage(services: ServiceSummary[], page: PageKey): ServiceSummary[] {
-  if (page === "http") {
-    return services.filter((service) => service.kind === "http_reverse" || service.kind === "http_forward");
-  }
   if (page === "forwarding") {
-    return services.filter((service) => service.kind === "tcp_forward" || service.kind === "udp_forward");
+    return services.filter(
+      (service) =>
+        service.kind === "http_reverse" ||
+        service.kind === "http_forward" ||
+        service.kind === "tcp_forward" ||
+        service.kind === "udp_forward",
+    );
   }
   if (page === "ssh") {
     return services.filter(
@@ -406,8 +510,9 @@ export function filterServicesByPage(services: ServiceSummary[], page: PageKey):
 
 /** 根据服务类型定位编辑页面。 */
 export function pageForServiceKind(kind: ServiceKind): PageKey {
-  if (kind === "http_reverse" || kind === "http_forward") return "http";
-  if (kind === "tcp_forward" || kind === "udp_forward") return "forwarding";
+  if (kind === "http_reverse" || kind === "http_forward" || kind === "tcp_forward" || kind === "udp_forward") {
+    return "forwarding";
+  }
   if (kind === "ssh_local" || kind === "ssh_remote" || kind === "ssh_socks") return "ssh";
   return "dashboard";
 }
@@ -416,8 +521,8 @@ export function pageForServiceKind(kind: ServiceKind): PageKey {
 export function pageTitle(page: PageKey): string {
   const titles: Record<PageKey, string> = {
     dashboard: "仪表盘",
-    http: "HTTP",
-    forwarding: "端口转发",
+    services: "服务",
+    forwarding: "转发",
     ssh: "SSH",
     system: "系统代理",
     settings: "设置",
@@ -507,9 +612,64 @@ function normalizeBodyRewriteRules(rules: BodyRewriteRuleInput[]): BodyRewriteRu
   }));
 }
 
+function normalizeToolServiceRoutes(routes: ToolServiceRouteDraft[]): ToolServiceRouteInput[] | string {
+  const normalized: ToolServiceRouteInput[] = [];
+  for (const [index, route] of routes.entries()) {
+    const label = `接口 #${index + 1}`;
+    if (!isToolServiceMethod(route.method)) {
+      return `${label} 的请求方法无效。`;
+    }
+    if (!route.path.trim()) {
+      return `${label} 的请求路径不能为空。`;
+    }
+    const responseStatus = parseHttpStatus(route.responseStatus);
+    if (typeof responseStatus === "string") return `${label} ${responseStatus}`;
+    const contentType = route.contentType.trim() || "application/json; charset=utf-8";
+    if (route.contentSource === "file" && !route.filePath.trim()) {
+      return `${label} 需要选择响应文件。`;
+    }
+    if (route.contentSource === "inline" && contentType.toLowerCase().includes("json")) {
+      try {
+        JSON.parse(route.body);
+      } catch (error) {
+        return `${label} 的响应结果不是合法 JSON: ${readError(error)}`;
+      }
+    }
+    normalized.push({
+      method: route.method,
+      path: normalizeHttpPath(route.path),
+      responseStatus,
+      contentType,
+      contentSource: route.contentSource,
+      body: route.contentSource === "inline" ? route.body : null,
+      filePath: route.contentSource === "file" ? route.filePath.trim() : null,
+    });
+  }
+  return normalized;
+}
+
+function isToolServiceMethod(value: string): value is ToolServiceMethod {
+  return ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ANY"].includes(value);
+}
+
 function parsePort(value: string): number | null {
   const port = Number(value);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+function parseHttpStatus(value: string): number | string {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 100 || parsed > 599) {
+    return "响应状态码必须是 100-599。";
+  }
+  return parsed;
+}
+
+function normalizeHttpPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  const withLeading = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeading.replace(/\/+$/u, "") || "/";
 }
 
 function parsePositiveInteger(value: string, label: string): number | string {

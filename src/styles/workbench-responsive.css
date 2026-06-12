@@ -1,0 +1,236 @@
+/**
+ * @author kongweiguang
+ * Workbench 响应式布局样式。
+ */
+
+@media (max-width: 1180px) {
+.two-column,
+  .ssh-workbench,
+  .system-proxy-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 920px) {
+  .app-frame {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--titlebar-height) auto minmax(0, 1fr);
+    grid-template-areas:
+      "titlebar"
+      "sidebar"
+      "workspace";
+  }
+
+  .app-shell {
+    display: contents;
+  }
+
+  .sidebar {
+    position: sticky;
+    grid-area: sidebar;
+    z-index: 20;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    overflow-x: visible;
+    padding: 12px;
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.72);
+  }
+
+  .system-titlebar {
+    grid-area: titlebar;
+  }
+
+  .workspace {
+    grid-area: workspace;
+    min-height: 0;
+  }
+
+  .dialog-backdrop {
+    padding: calc(var(--titlebar-height) + 16px) 14px 14px;
+  }
+
+  .dialog-panel,
+  .dialog-panel-wide {
+    width: min(100%, 720px);
+    max-height: calc(100dvh - var(--titlebar-height) - 30px);
+  }
+
+  .brand {
+    flex: 0 0 auto;
+    border-bottom: 0;
+  }
+
+  .sidebar nav {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 420px;
+    flex-wrap: wrap;
+  }
+
+  .nav-group {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .nav-item {
+    width: auto;
+  }
+
+  .filter-bar .ghost-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  table,
+  thead,
+  tbody,
+  tr,
+  td {
+    display: block;
+  }
+
+  table {
+    min-width: 0;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  tr {
+    display: grid;
+    gap: 2px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.7);
+  }
+
+  td {
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 10px;
+    min-width: 0;
+    padding: 6px 2px;
+    border-bottom: 0;
+    overflow-wrap: anywhere;
+  }
+
+  td::before {
+    content: attr(data-label);
+    color: var(--text-soft);
+    font-weight: 600;
+  }
+
+  td[data-label="名称"],
+  td[data-label="操作"] {
+    grid-template-columns: 1fr;
+  }
+
+  td[data-label="名称"]::before,
+  td[data-label="操作"]::before {
+    display: none;
+  }
+
+  .log-row {
+    grid-template-columns: 1fr;
+  }
+
+  .log-workbench {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .window-control {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .workspace {
+    padding: 12px;
+  }
+
+  .topbar,
+  .panel-heading,
+  .compact-row,
+  .selected-source-summary,
+  .details div,
+  .setting-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .topbar .ghost-button,
+  .button-row > button {
+    width: 100%;
+  }
+
+  .nav-item {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+  }
+
+  .form-grid,
+  .filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-row .icon-row {
+    width: 100%;
+  }
+
+  .folder-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .source-row-main {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .selected-source-summary .icon-row {
+    width: 100%;
+  }
+
+  .system-proxy-status-strip,
+  .system-proxy-status-main {
+    align-items: stretch;
+  }
+
+  .system-proxy-status-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .system-proxy-status-details {
+    grid-template-columns: 1fr;
+  }
+
+  .system-proxy-status-main strong,
+  .system-proxy-status-main small,
+  .system-proxy-status-details dd {
+    white-space: normal;
+  }
+
+  .details dd {
+    text-align: left;
+  }
+
+  .rule-editor-heading {
+    flex-direction: column;
+  }
+
+  .rule-editor-heading .ghost-button {
+    width: 100%;
+  }
+}

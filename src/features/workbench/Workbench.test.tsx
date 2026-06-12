@@ -16,6 +16,7 @@ import type {
   SshProfile,
   SystemProxyProfile,
   SystemProxyStatus,
+  ToolServiceSummary,
 } from "../../types";
 import { Workbench } from "./Workbench";
 
@@ -35,6 +36,13 @@ const apiMocks = vi.hoisted(() => ({
   servicesRestart: vi.fn(),
   servicesRuntime: vi.fn(),
   servicesTest: vi.fn(),
+  toolServicesList: vi.fn(),
+  toolServicesCreate: vi.fn(),
+  toolServicesStart: vi.fn(),
+  toolServicesStop: vi.fn(),
+  toolServicesDelete: vi.fn(),
+  fileDialogChooseDirectory: vi.fn(),
+  fileDialogChooseFile: vi.fn(),
   sshList: vi.fn(),
   sshGet: vi.fn(),
   sshCreate: vi.fn(),
@@ -77,6 +85,19 @@ vi.mock("../../api", () => ({
     listRuntimeStatus: apiMocks.servicesRuntime,
     test: apiMocks.servicesTest,
   },
+  toolServicesApi: {
+    list: apiMocks.toolServicesList,
+    create: apiMocks.toolServicesCreate,
+    start: apiMocks.toolServicesStart,
+    stop: apiMocks.toolServicesStop,
+    delete: apiMocks.toolServicesDelete,
+    chooseDirectory: apiMocks.fileDialogChooseDirectory,
+    chooseFile: apiMocks.fileDialogChooseFile,
+  },
+  fileDialogApi: {
+    chooseDirectory: apiMocks.fileDialogChooseDirectory,
+    chooseFile: apiMocks.fileDialogChooseFile,
+  },
   sshProfilesApi: {
     list: apiMocks.sshList,
     get: apiMocks.sshGet,
@@ -114,16 +135,18 @@ describe("Workbench", () => {
     mockApis();
   });
 
-  it("submits the visible forwarding service kind instead of the stale dashboard draft", async () => {
+  it("submits a selected TCP service kind from the unified forwarding page", async () => {
     const user = userEvent.setup();
     render(<Workbench />);
 
     await screen.findByRole("heading", { name: "仪表盘" });
-    await user.click(screen.getByRole("button", { name: "端口转发" }));
+    expect(screen.queryByRole("button", { name: "HTTP" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "转发" }));
     await user.click(screen.getByRole("button", { name: "添加配置" }));
 
-    const panel = dialogByHeading("添加 端口转发 配置");
-    expect(within(panel).getByLabelText("服务类型")).toHaveValue("tcp_forward");
+    const panel = dialogByHeading("添加 转发 配置");
+    expect(within(panel).getByRole("combobox", { name: "服务类型" })).toHaveAttribute("data-value", "http_reverse");
+    await chooseComboboxOption(user, panel, "服务类型", "TCP 转发");
     await user.type(within(panel).getByLabelText("服务名称"), "Database TCP");
     await user.click(within(panel).getByRole("button", { name: /创建服务/ }));
 
@@ -215,7 +238,7 @@ describe("Workbench", () => {
     await user.type(within(panel).getByLabelText("主机"), "app.internal");
     await user.type(within(panel).getByLabelText("用户名"), "deploy");
     await user.type(within(panel).getByLabelText("密码"), "secret");
-    await user.selectOptions(within(panel).getByLabelText("跳板配置"), "jump-1");
+    await chooseComboboxOption(user, panel, "跳板配置", "堡垒机 (deploy@bastion.example.com:22)");
     await user.click(within(panel).getByRole("button", { name: /添加 SSH 配置/ }));
 
     await waitFor(() => expect(apiMocks.sshCreate).toHaveBeenCalledTimes(1));
@@ -230,6 +253,36 @@ describe("Workbench", () => {
     );
   });
 
+  it("uses file pickers for SSH private key and known_hosts paths", async () => {
+    const user = userEvent.setup();
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "SSH" }));
+    await user.click(screen.getByRole("button", { name: /添加 SSH 配置/ }));
+
+    const panel = dialogByHeading("添加 SSH 配置");
+    await chooseComboboxOption(user, panel, "认证方式", "私钥");
+
+    const privateKeyInput = within(panel).getByLabelText("私钥路径");
+    expect(privateKeyInput).toHaveAttribute("readonly");
+    const privateKeyPicker = privateKeyInput.closest(".folder-picker");
+    if (!privateKeyPicker) {
+      throw new Error("找不到私钥选择器");
+    }
+    await user.click(within(privateKeyPicker as HTMLElement).getByRole("button", { name: "选择" }));
+    await waitFor(() => expect(privateKeyInput).toHaveValue("C:/fixtures/response.json"));
+
+    const knownHostsInput = within(panel).getByLabelText("known_hosts 路径");
+    expect(knownHostsInput).toHaveAttribute("readonly");
+    const knownHostsPicker = knownHostsInput.closest(".folder-picker");
+    if (!knownHostsPicker) {
+      throw new Error("找不到 known_hosts 选择器");
+    }
+    await user.click(within(knownHostsPicker as HTMLElement).getByRole("button", { name: "选择" }));
+    await waitFor(() => expect(apiMocks.fileDialogChooseFile).toHaveBeenCalledTimes(2));
+  });
+
   it("creates an SSH SOCKS5 service without target host and port", async () => {
     const user = userEvent.setup();
     mockApis({ profiles: [sshProfile()] });
@@ -241,11 +294,11 @@ describe("Workbench", () => {
     await user.click(screen.getByRole("button", { name: "添加 SSH 隧道" }));
 
     const panel = dialogByHeading("添加 SSH 隧道配置");
-    await user.selectOptions(within(panel).getByLabelText("服务类型"), "ssh_socks");
+    await chooseComboboxOption(user, panel, "服务类型", "SSH SOCKS5 动态代理");
     expect(within(panel).queryByLabelText("目标主机")).not.toBeInTheDocument();
     expect(within(panel).queryByLabelText("目标端口")).not.toBeInTheDocument();
     await user.type(within(panel).getByLabelText("服务名称"), "Dev SOCKS");
-    await user.selectOptions(within(panel).getByLabelText("SSH 配置"), "ssh-1");
+    await chooseComboboxOption(user, panel, "SSH 配置", "Prod SSH");
     await user.click(within(panel).getByRole("button", { name: /创建服务/ }));
 
     await waitFor(() => expect(apiMocks.servicesCreate).toHaveBeenCalledTimes(1));
@@ -276,14 +329,14 @@ describe("Workbench", () => {
     await user.click(screen.getByRole("button", { name: "添加 SSH 隧道" }));
 
     const panel = dialogByHeading("添加 SSH 隧道配置");
-    await user.selectOptions(within(panel).getByLabelText("服务类型"), "ssh_remote");
+    await chooseComboboxOption(user, panel, "服务类型", "SSH 远程隧道");
     expect(within(panel).getByLabelText("远程绑定主机")).toBeInTheDocument();
     expect(within(panel).getByLabelText("远程绑定端口")).toBeInTheDocument();
     expect(within(panel).getByLabelText("本地目标主机")).toBeInTheDocument();
     expect(within(panel).getByLabelText("本地目标端口")).toBeInTheDocument();
 
     await user.type(within(panel).getByLabelText("服务名称"), "Remote Web");
-    await user.selectOptions(within(panel).getByLabelText("SSH 配置"), "ssh-1");
+    await chooseComboboxOption(user, panel, "SSH 配置", "Prod SSH");
     await user.clear(within(panel).getByLabelText("远程绑定主机"));
     await user.type(within(panel).getByLabelText("远程绑定主机"), "0.0.0.0");
     await user.clear(within(panel).getByLabelText("远程绑定端口"));
@@ -313,6 +366,69 @@ describe("Workbench", () => {
     );
   });
 
+  it("creates and starts a persisted local HTTP service from the service list dialog", async () => {
+    const user = userEvent.setup();
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "服务" }));
+    await user.click(screen.getByRole("button", { name: "添加服务" }));
+    const panel = dialogByHeading("添加 HTTP 服务");
+    await user.clear(within(panel).getByLabelText("服务名称"));
+    await user.type(within(panel).getByLabelText("服务名称"), "Local API");
+    await user.clear(within(panel).getByLabelText("端口"));
+    await user.type(within(panel).getByLabelText("端口"), "18081");
+    await user.clear(within(panel).getByLabelText("路径 #1"));
+    await user.type(within(panel).getByLabelText("路径 #1"), "/api/ping");
+    await user.click(within(panel).getByRole("button", { name: "创建并启动" }));
+
+    await waitFor(() => expect(apiMocks.toolServicesCreate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.toolServicesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Local API",
+        port: 18081,
+        staticRootDir: null,
+        staticPathPrefix: "/",
+        routes: [
+          expect.objectContaining({
+            method: "GET",
+            path: "/api/ping",
+            responseStatus: 200,
+            contentSource: "inline",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("toggles persisted local HTTP services without deleting the saved config", async () => {
+    const user = userEvent.setup();
+    mockApis({
+      toolServices: [
+        toolServiceSummary({ id: "tool-running", name: "Running Tool", runtimeStatus: { type: "running" } }),
+        toolServiceSummary({ id: "tool-stopped", name: "Stopped Tool", runtimeStatus: { type: "stopped" }, startedAt: null }),
+      ],
+    });
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "服务" }));
+
+    const runningRow = screen.getByText("Running Tool").closest(".compact-row");
+    const stoppedRow = screen.getByText("Stopped Tool").closest(".compact-row");
+    if (!runningRow || !stoppedRow) {
+      throw new Error("找不到工具服务行");
+    }
+
+    await user.click(within(runningRow as HTMLElement).getByTitle("暂停服务"));
+    await waitFor(() => expect(apiMocks.toolServicesStop).toHaveBeenCalledWith("tool-running"));
+    expect(apiMocks.toolServicesDelete).not.toHaveBeenCalled();
+
+    await user.click(within(stoppedRow as HTMLElement).getByTitle("启动服务"));
+    await waitFor(() => expect(apiMocks.toolServicesStart).toHaveBeenCalledWith("tool-stopped"));
+  });
+
   it("passes log service, level, protocol and keyword filters to the API", async () => {
     const user = userEvent.setup();
     mockApis({
@@ -334,14 +450,13 @@ describe("Workbench", () => {
       expect(apiMocks.logsList).toHaveBeenCalledWith(expect.objectContaining({ serviceId: "svc-http", limit: 200 })),
     );
 
-    const filters = screen.getAllByRole("combobox");
-    await user.selectOptions(filters[0], "error");
+    await chooseComboboxOption(user, document.body, "级别筛选", "错误");
     await waitFor(() =>
       expect(apiMocks.logsList).toHaveBeenCalledWith(
         expect.objectContaining({ serviceId: "svc-http", level: "error", limit: 200 }),
       ),
     );
-    await user.selectOptions(filters[1], "http");
+    await chooseComboboxOption(user, document.body, "协议筛选", "HTTP");
     await waitFor(() =>
       expect(apiMocks.logsList).toHaveBeenCalledWith(
         expect.objectContaining({ serviceId: "svc-http", protocol: "http", limit: 200 }),
@@ -423,15 +538,19 @@ describe("Workbench", () => {
 
     await screen.findByRole("heading", { name: "仪表盘" });
     await user.click(screen.getByRole("button", { name: "系统代理" }));
-    const sourcePanel = panelByHeading("系统代理来源");
+    const sourcePanel = panelByHeading("代理配置列表");
     expect(within(sourcePanel).getByText("Forward")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /启动并设为系统代理/ }));
+    const row = within(sourcePanel).getByText("Forward").closest(".source-row");
+    if (!row) {
+      throw new Error("找不到 Forward 行");
+    }
+    await user.click(within(row as HTMLElement).getByRole("button", { name: /启动并启用/ }));
 
     await waitFor(() => expect(apiMocks.servicesStart).toHaveBeenCalledWith("svc-forward"));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-forward"));
   });
 
-  it("selects a system proxy source from the unified list and enables it from the right panel", async () => {
+  it("selects a system proxy source from the unified list and enables it inline", async () => {
     const user = userEvent.setup();
     mockApis({
       services: [
@@ -454,40 +573,16 @@ describe("Workbench", () => {
 
     await screen.findByRole("heading", { name: "仪表盘" });
     await user.click(screen.getByRole("button", { name: "系统代理" }));
-    const panel = panelByHeading("系统代理来源");
+    const panel = panelByHeading("代理配置列表");
     const row = within(panel).getByText("Forward Alt").closest(".source-row");
     if (!row) {
       throw new Error("找不到 Forward Alt 行");
     }
-    await user.click(row as HTMLElement);
-    await user.click(within(panelByHeading("启动代理")).getByRole("button", { name: /设为系统代理/ }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: /Forward Alt/ }));
+    expect(row).toHaveClass("selected");
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "启用" }));
 
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-alt"));
-  });
-
-  it("sets the system proxy from a manual target", async () => {
-    const user = userEvent.setup();
-    render(<Workbench />);
-
-    await screen.findByRole("heading", { name: "仪表盘" });
-    await user.click(screen.getByRole("button", { name: "系统代理" }));
-
-    const panel = panelByHeading("临时手动目标");
-    await user.clear(within(panel).getByLabelText("主机"));
-    await user.type(within(panel).getByLabelText("主机"), "192.168.1.10");
-    await user.clear(within(panel).getByLabelText("端口"));
-    await user.type(within(panel).getByLabelText("端口"), "1080");
-    await user.clear(within(panel).getByLabelText("绕过地址"));
-    await user.type(within(panel).getByLabelText("绕过地址"), "localhost;10.*");
-    await user.click(within(panel).getByRole("button", { name: /使用手动目标设置/ }));
-
-    await waitFor(() =>
-      expect(apiMocks.proxySetTarget).toHaveBeenCalledWith({
-        proxyHost: "192.168.1.10",
-        proxyPort: 1080,
-        bypass: "localhost;10.*",
-      }),
-    );
   });
 
   it("creates, edits, uses and deletes system proxy profiles", async () => {
@@ -499,26 +594,26 @@ describe("Workbench", () => {
     await screen.findByRole("heading", { name: "仪表盘" });
     await user.click(screen.getByRole("button", { name: "系统代理" }));
 
-    await user.click(screen.getByRole("button", { name: "添加配置档" }));
-    let panel = dialogByHeading("添加系统代理配置档");
+    await user.click(screen.getByRole("button", { name: "添加配置" }));
+    let panel = dialogByHeading("添加系统代理配置");
     await user.type(within(panel).getByLabelText("名称"), "办公网");
     await user.clear(within(panel).getByLabelText("主机"));
     await user.type(within(panel).getByLabelText("主机"), "127.0.0.1");
     await user.clear(within(panel).getByLabelText("端口"));
     await user.type(within(panel).getByLabelText("端口"), "7890");
-    await user.click(within(panel).getByRole("button", { name: /添加配置档/ }));
+    await user.click(within(panel).getByRole("button", { name: /添加配置/ }));
     await waitFor(() =>
       expect(apiMocks.proxyProfileCreate).toHaveBeenCalledWith(
         expect.objectContaining({ name: "办公网", proxyHost: "127.0.0.1", proxyPort: 7890 }),
       ),
     );
 
-    await user.click(await screen.findByTitle("编辑配置档"));
-    panel = dialogByHeading("编辑系统代理配置档");
+    await user.click(await screen.findByTitle("编辑配置"));
+    panel = dialogByHeading("编辑系统代理配置");
     expect(within(panel).getByLabelText("名称")).toHaveValue("办公网代理");
     await user.clear(within(panel).getByLabelText("名称"));
     await user.type(within(panel).getByLabelText("名称"), "家庭代理");
-    await user.click(within(panel).getByRole("button", { name: /保存配置档/ }));
+    await user.click(within(panel).getByRole("button", { name: /保存配置/ }));
     await waitFor(() =>
       expect(apiMocks.proxyProfileUpdate).toHaveBeenCalledWith(
         "proxy-profile-1",
@@ -526,10 +621,15 @@ describe("Workbench", () => {
       ),
     );
 
-    await user.click(within(panelByHeading("启动代理")).getByRole("button", { name: /设为系统代理/ }));
+    const profileMainButton = within(panelByHeading("代理配置列表")).getByRole("button", { name: /办公网代理/ });
+    const profileRow = profileMainButton.closest(".source-row");
+    if (!profileRow) {
+      throw new Error("找不到系统代理配置行");
+    }
+    await user.click(within(profileRow as HTMLElement).getByRole("button", { name: "启用" }));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("proxy-profile-1"));
 
-    await user.click(await screen.findByTitle("删除配置档"));
+    await user.click(await screen.findByTitle("删除配置"));
     await waitFor(() => expect(apiMocks.proxyProfileDelete).toHaveBeenCalledWith("proxy-profile-1"));
   });
 
@@ -585,6 +685,7 @@ describe("Workbench", () => {
 function mockApis({
   services = [],
   runtime = [],
+  toolServices = [],
   profiles = [],
   logs = [],
   settings = defaultSettings(),
@@ -594,6 +695,7 @@ function mockApis({
 }: {
   services?: ServiceSummary[];
   runtime?: ServiceRuntimeSummary[];
+  toolServices?: ToolServiceSummary[];
   profiles?: SshProfile[];
   logs?: LogRow[];
   settings?: AppSetting[];
@@ -616,6 +718,13 @@ function mockApis({
   apiMocks.servicesRestart.mockResolvedValue({ type: "running" });
   apiMocks.servicesRuntime.mockResolvedValue(runtime);
   apiMocks.servicesTest.mockResolvedValue({ ok: true, message: "ok", durationMs: 1 });
+  apiMocks.toolServicesList.mockResolvedValue(toolServices);
+  apiMocks.toolServicesCreate.mockResolvedValue(toolServiceSummary());
+  apiMocks.toolServicesStart.mockResolvedValue(toolServiceSummary());
+  apiMocks.toolServicesStop.mockResolvedValue({ type: "stopped" });
+  apiMocks.toolServicesDelete.mockResolvedValue(undefined);
+  apiMocks.fileDialogChooseDirectory.mockResolvedValue("C:/fixtures/static");
+  apiMocks.fileDialogChooseFile.mockResolvedValue("C:/fixtures/response.json");
   apiMocks.sshList.mockResolvedValue(profiles);
   apiMocks.sshGet.mockResolvedValue(profiles[0] ?? sshProfile());
   apiMocks.sshCreate.mockResolvedValue(sshProfile());
@@ -645,6 +754,17 @@ function panelByHeading(name: string): HTMLElement {
 
 function dialogByHeading(name: string): HTMLElement {
   return screen.getByRole("dialog", { name });
+}
+
+async function chooseComboboxOption(
+  user: ReturnType<typeof userEvent.setup>,
+  container: HTMLElement,
+  name: string,
+  optionName: string,
+): Promise<void> {
+  const scope = within(container);
+  await user.click(scope.getByRole("combobox", { name }));
+  await user.click(scope.getByRole("option", { name: optionName }));
 }
 
 function defaultSettings(): AppSetting[] {
@@ -728,6 +848,23 @@ function serviceDetail(overrides: Partial<ServiceDetail> = {}): ServiceDetail {
     sshTunnel: null,
     headerRules: [],
     bodyRewriteRules: [],
+    ...overrides,
+  };
+}
+
+function toolServiceSummary(overrides: Partial<ToolServiceSummary> = {}): ToolServiceSummary {
+  return {
+    id: "tool-1",
+    name: "Local API",
+    host: "127.0.0.1",
+    port: 18081,
+    url: "http://127.0.0.1:18081/api/ping",
+    staticRootDir: null,
+    staticPathPrefix: "/",
+    routeCount: 1,
+    startedAt: "2026-01-01T00:00:00Z",
+    totalRequests: 0,
+    runtimeStatus: { type: "running" },
     ...overrides,
   };
 }

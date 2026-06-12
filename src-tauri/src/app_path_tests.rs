@@ -1,7 +1,10 @@
 //! @author kongweiguang
-//! 应用数据目录解析测试，覆盖 release smoke 使用的环境变量覆盖入口。
+//! 应用数据目录解析测试，覆盖用户目录和 release smoke 覆盖入口。
 
-use super::{app_data_dir_override, service_auto_start_enabled, services_selected_for_auto_start};
+use super::{
+    app_data_dir_override, net_power_data_dir, resolve_app_data_dir_from_home,
+    service_auto_start_enabled, services_selected_for_auto_start,
+};
 use crate::models::{AppSetting, ServiceDetail, ServiceKind};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -19,6 +22,28 @@ fn app_data_dir_override_accepts_explicit_path() {
     assert_eq!(
         app_data_dir_override(Some(path.clone().into_os_string())),
         Some(path)
+    );
+}
+
+#[test]
+fn default_app_data_dir_uses_hidden_net_power_under_home() {
+    let home = PathBuf::from(r"C:\Users\tester");
+
+    assert_eq!(
+        resolve_app_data_dir_from_home(None, home.clone()),
+        home.join(".net-power")
+    );
+    assert_eq!(net_power_data_dir(home.clone()), home.join(".net-power"));
+}
+
+#[test]
+fn app_data_dir_override_wins_over_home_directory() {
+    let override_path = PathBuf::from(r"D:\isolated\net-power");
+    let home = PathBuf::from(r"C:\Users\tester");
+
+    assert_eq!(
+        resolve_app_data_dir_from_home(Some(override_path.clone()), home),
+        override_path
     );
 }
 

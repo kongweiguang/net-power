@@ -8,13 +8,13 @@ use crate::models::{
     AppSetting, AutostartStatus, CreateServiceInput, LogFilter, LogRow, RuntimeStatus,
     ServiceDetail, ServiceKind, ServiceRuntimeSummary, ServiceSummary, SshProfile, SshProfileInput,
     SystemInfo, SystemProxyProfile, SystemProxyProfileInput, SystemProxyStatus, SystemProxyTarget,
-    TestResult,
+    TestResult, ToolServiceInput, ToolServiceSummary,
 };
 use crate::proxy;
 use crate::system_proxy;
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
@@ -125,13 +125,7 @@ pub async fn delete_service(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    {
-        let mut manager = state.manager.write().await;
-        manager
-            .stop_service(&id, Arc::clone(&state.db), app.clone())
-            .await
-            .map_err(String::from)?;
-    }
+    stop_service_for_command(app, &state, &id).await?;
     state.db.delete_service(&id).map_err(String::from)
 }
 
@@ -163,11 +157,7 @@ pub async fn stop_service(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<RuntimeStatus, String> {
-    let mut manager = state.manager.write().await;
-    manager
-        .stop_service(&id, Arc::clone(&state.db), app)
-        .await
-        .map_err(String::from)
+    stop_service_for_command(app, &state, &id).await
 }
 
 /// 重启服务。
@@ -177,13 +167,7 @@ pub async fn restart_service(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<RuntimeStatus, String> {
-    {
-        let mut manager = state.manager.write().await;
-        manager
-            .stop_service(&id, Arc::clone(&state.db), app.clone())
-            .await
-            .map_err(String::from)?;
-    }
+    stop_service_for_command(app.clone(), &state, &id).await?;
     start_service(app, state, id).await
 }
 
@@ -193,6 +177,85 @@ pub async fn list_runtime_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ServiceRuntimeSummary>, String> {
     Ok(state.manager.read().await.list_runtime_status())
+}
+
+/// 创建本地工具 HTTP 服务配置并立即启动。即使后续暂停，配置仍保留在 SQLite。
+#[tauri::command]
+pub async fn create_tool_service(
+    state: State<'_, AppState>,
+    input: ToolServiceInput,
+) -> Result<ToolServiceSummary, String> {
+    let config = state.db.create_tool_service(&input).map_err(String::from)?;
+    state
+        .tool_services
+        .write()
+        .await
+        .start(config.id.clone(), config.to_input())
+        .await
+        .map_err(String::from)
+}
+
+/// 启动已保存的本地工具 HTTP 服务。
+#[tauri::command]
+pub async fn start_tool_service(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ToolServiceSummary, String> {
+    let config = state.db.get_tool_service(&id).map_err(String::from)?;
+    state
+        .tool_services
+        .write()
+        .await
+        .start(config.id.clone(), config.to_input())
+        .await
+        .map_err(String::from)
+}
+
+/// 停止本地工具服务。
+#[tauri::command]
+pub async fn stop_tool_service(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<RuntimeStatus, String> {
+    let stopping = {
+        let mut tool_services = state.tool_services.write().await;
+        tool_services.begin_stop(&id)
+    };
+    let Some(stopping) = stopping else {
+        return Ok(RuntimeStatus::Stopped);
+    };
+    stopping.wait().await.map_err(String::from)
+}
+
+/// 删除本地工具服务配置。若服务正在运行，会先暂停再软删除。
+#[tauri::command]
+pub async fn delete_tool_service(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let stopping = {
+        let mut tool_services = state.tool_services.write().await;
+        tool_services.begin_stop(&id)
+    };
+    if let Some(stopping) = stopping {
+        stopping.wait().await.map_err(String::from)?;
+    }
+    state.db.delete_tool_service(&id).map_err(String::from)
+}
+
+/// 查询本地工具服务配置列表，并合并当前运行态。
+#[tauri::command]
+pub async fn list_tool_services(
+    state: State<'_, AppState>,
+) -> Result<Vec<ToolServiceSummary>, String> {
+    let mut summaries = state
+        .db
+        .list_tool_service_summaries()
+        .map_err(String::from)?;
+    let tool_services = state.tool_services.read().await;
+    for summary in &mut summaries {
+        if let Some(running) = tool_services.running_summary(&summary.id) {
+            *summary = running;
+        }
+    }
+    Ok(summaries)
 }
 
 /// 测试服务配置的基础可达性。
@@ -454,9 +517,7 @@ pub fn get_system_proxy_status() -> Result<SystemProxyStatus, String> {
 /// 获取系统和应用信息。
 #[tauri::command]
 pub fn get_system_info(app: AppHandle) -> Result<SystemInfo, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
+    let data_dir = crate::resolve_app_data_dir_for_handle(&app)
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
     Ok(SystemInfo {
@@ -534,4 +595,29 @@ async fn tcp_connect_test(addr: &str, timeout_ms: u64) -> AppResult<()> {
     .await
     .map_err(|_| AppError::Message(format!("连接 {addr} 超时")))??;
     Ok(())
+}
+
+async fn stop_service_for_command(
+    app: AppHandle,
+    state: &AppState,
+    id: &str,
+) -> Result<RuntimeStatus, String> {
+    let stopping = {
+        let mut manager = state.manager.write().await;
+        manager.begin_stop_service(id)
+    };
+    let Some(stopping) = stopping else {
+        return Ok(RuntimeStatus::Stopped);
+    };
+
+    let outcome = stopping
+        .wait(Arc::clone(&state.db), app)
+        .await
+        .map_err(String::from)?;
+    let status = outcome.status();
+    {
+        let mut manager = state.manager.write().await;
+        manager.complete_stop(outcome);
+    }
+    Ok(status)
 }

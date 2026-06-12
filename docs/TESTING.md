@@ -70,13 +70,13 @@ npm run verify:tray
 npm run verify:smoke
 ```
 
-当前 Rust 单元测试覆盖 migration 默认设置、应用数据目录覆盖、服务自动启动选择、服务 CRUD、服务更新事务失败回滚、ServiceManager start/stop 生命周期、运行态端口冲突、异常退出失败态、失败后重启、停止后端口释放、HTTP reverse URL、HTTP reverse 真实转发与 request/response header/body 改写、HTTP chunked 请求体解码/rewrite/Content-Length 规范化、HTTP/1.1 keep-alive 单连接双请求顺序复用、HTTP forward 完整 URL 代理、HTTPS CONNECT 隧道字节复制、TCP 双向复制、UDP 多客户端请求/响应映射、UDP 客户端映射复用、UDP idle 清理、header set/remove、JSON/form body rewrite、缺失 Content-Type 的 JSON 探测、form/json 混合规则、数组越界 warning 跳过、rewrite body size limit、secret 加密后 SQLite 不含明文、密码 SSH profile secret 校验、SSH 跳板链 roundtrip/解析顺序/循环引用/删除保护、系统代理配置档 CRUD/target 解析/active 标记、system proxy 跨平台命令构造和状态解析、Windows 系统代理真实注册表 set/status/clear roundtrip、service/connection 日志合并查询与 protocol/time range 筛选、日志保留天数和最大总行数清理、SSH local/SSH remote/SSH SOCKS 配置 roundtrip、SSH remote 远程绑定冲突域和本地端口探测跳过、SSH remote 自动重连退避上限、SOCKS5 no-auth CONNECT 解析、known_hosts 主机名格式、known_hosts strict 缺失文件/未知主机/mismatch 判定、系统托盘左键/右键事件判定、托盘中文菜单项和菜单事件动作映射、真实 OpenSSH 密码认证和 direct-tcpip bridge、真实 OpenSSH 多级跳板链 direct-tcpip、真实 OpenSSH remote forward、真实 OpenSSH SOCKS5 动态代理、真实 OpenSSH strict known_hosts mismatch 拒绝连接、真实 OpenSSH passphrase 私钥认证。
-当前前端 Vitest 覆盖 Workbench 表单校验、结构化规则转换、高级超时字段转换、SSH remote/SOCKS5 协议转换、SSH known_hosts/timeouts/jumpProfileId 转换、密码认证空密码校验、SSH Profile secret 不回填、SSH Profile 跳板选择、服务编辑回填、页面筛选、字节格式化、服务弹框编辑保存、Forwarding 页面提交真实 kind、SSH 页面创建 remote 服务并区分远程绑定/本地目标、SSH 页面创建 SOCKS5 服务且不要求固定目标、SSH Profile 通过 get API 编辑且不泄露 secret、配置日志 level/protocol/time range/keyword 筛选、流量详情和 meta 展示、System Proxy 统一来源列表、右侧启动设置、手动目标、系统代理配置档管理和设置页开机启动开关。
+当前 Rust 单元测试覆盖 migration 默认设置、应用数据目录默认解析、环境变量覆盖、服务自动启动选择、服务 CRUD、服务更新事务失败回滚、HTTP 工具服务配置持久化 roundtrip、ServiceManager start/stop 生命周期、运行态端口冲突、异常退出失败态、失败后重启、停止后端口释放、ToolServiceManager 统一 HTTP 服务的静态目录、内联接口响应和文件接口响应、HTTP reverse URL、HTTP reverse 真实转发与 request/response header/body 改写、HTTP chunked 请求体解码/rewrite/Content-Length 规范化、HTTP/1.1 keep-alive 单连接双请求顺序复用、HTTP forward 完整 URL 代理、HTTPS CONNECT 隧道字节复制、TCP 双向复制、UDP 多客户端请求/响应映射、UDP 客户端映射复用、UDP idle 清理、header set/remove、JSON/form body rewrite、缺失 Content-Type 的 JSON 探测、form/json 混合规则、数组越界 warning 跳过、rewrite body size limit、secret 加密后 SQLite 不含明文、密码 SSH profile secret 校验、SSH 跳板链 roundtrip/解析顺序/循环引用和删除保护、系统代理配置档 CRUD/target 解析和 active 标记、system proxy 跨平台命令构造和状态解析、Windows 系统代理真实注册表 set/status/clear roundtrip、service/connection 日志合并查询与 protocol/time range 筛选、日志保留天数和最大总行数清理、SSH local/SSH remote/SSH SOCKS 配置 roundtrip、SSH remote 远程绑定冲突域和本地端口探测跳过、SSH remote 自动重连退避上限、SOCKS5 no-auth CONNECT 解析、known_hosts 主机名格式、known_hosts strict 缺失文件/未知主机/mismatch 判定、系统托盘左键/右键事件判定、托盘中文菜单项和菜单事件动作映射、真实 OpenSSH 密码认证和 direct-tcpip bridge、真实 OpenSSH 多级跳板链 direct-tcpip、真实 OpenSSH remote forward、真实 OpenSSH SOCKS5 动态代理、真实 OpenSSH strict known_hosts mismatch 拒绝连接、真实 OpenSSH passphrase 私钥认证。
+当前前端 Vitest 覆盖 Workbench 表单校验、工具服务表单校验和协议转换、结构化规则转换、高级超时字段转换、SSH remote/SOCKS5 协议转换、SSH known_hosts/timeouts/jumpProfileId 转换、密码认证空密码校验、SSH Profile secret 不回填、SSH Profile 跳板选择、SSH 私钥和 known_hosts 文件选择器、服务编辑回填、页面筛选、字节格式化、服务弹框编辑保存、服务页列表弹框创建并启动统一 HTTP 工具服务、工具服务启动/暂停单按钮切换、转发页面统一展示 HTTP/TCP/UDP 并提交真实 kind、SSH 页面创建 remote 服务并区分远程绑定/本地目标、SSH 页面创建 SOCKS5 服务且不要求固定目标、SSH Profile 通过 get API 编辑且不泄露 secret、配置日志 level/protocol/time range/keyword 筛选、流量详情和 meta 展示、System Proxy 配置列表、列表行内启用、系统代理配置管理和设置页开机启动开关。
 设置页应用更新入口已有组件测试覆盖，会 mock updater API 验证点击“检查更新”后展示下载进度和安装完成提示。
-当前 Playwright 视觉冒烟覆盖浏览器预览模式下的仪表盘、HTTP、端口转发、SSH、系统代理、设置页面和配置日志弹框，使用桌面、平板和 390px 窄屏 viewport 检查关键中文内容、流量详情面板和页面级横向溢出。
-当前安装器 smoke 覆盖 NSIS 安装包静默安装到临时目录、安装后 exe 启动、隔离 app data SQLite 初始化、安装后 exe WebView 桌面宽度与 390px 窄宽度截图、安装后 exe 关闭隐藏到托盘、静默卸载、安装文件清理和 Add/Remove Programs 注册表记录清理。
-当前 WebView smoke 覆盖真实 Tauri release 窗口启动、标题读取、桌面宽度与 390px 窄宽度 resize、非空截图和隔离 app data SQLite 初始化。
-当前 Tray smoke 覆盖真实 Tauri release 主窗口标题读取、隔离 app data SQLite 初始化、关闭请求、窗口隐藏到托盘和进程保持运行。
+当前 Playwright 视觉冒烟覆盖浏览器预览模式下的仪表盘、转发、SSH、系统代理、设置页面和配置日志弹框，使用桌面、平板和 390px 窄屏 viewport 检查关键中文内容、流量详情面板和页面级横向溢出。
+当前安装器 smoke 覆盖 NSIS 安装包静默安装到临时目录、安装后 exe 启动、隔离数据目录 SQLite 初始化、安装后 exe WebView 桌面宽度与 390px 窄宽度截图、安装后 exe 关闭隐藏到托盘、静默卸载、安装文件清理和 Add/Remove Programs 注册表记录清理。
+当前 WebView smoke 覆盖真实 Tauri release 窗口启动、标题读取、桌面宽度与 390px 窄宽度 resize、非空截图和隔离数据目录 SQLite 初始化。
+当前 Tray smoke 覆盖真实 Tauri release 主窗口标题读取、隔离数据目录 SQLite 初始化、关闭请求、窗口隐藏到托盘和进程保持运行。
 
 ## 当前缺口
 
@@ -148,24 +148,25 @@ cargo test external_ssh_private_key_passphrase_auth -- --nocapture
 | --- | --- | --- |
 | Rust 单元测试 | JSON path、body rewrite、header rules、secret crypto、配置校验。 | `cargo test` |
 | Rust 集成测试 | SQLite migration、repository transaction、ServiceManager 生命周期。 | `cargo test` + 临时数据库 |
+| 工具服务测试 | 已保存 HTTP 工具服务的静态目录、内联接口、文件接口、端口、目录/文件校验和暂停后配置保留。 | `cargo test` + 本地 loopback socket |
 | 代理集成测试 | HTTP reverse、HTTP keep-alive、HTTP forward、CONNECT、TCP/UDP forwarding。 | 本地 test upstream + tokio 测试 |
 | SSH 集成测试 | SSH auth、known_hosts、direct-tcpip local forward、remote forward、SOCKS5 动态代理。 | Docker/OpenSSH 或人工测试机 |
 | 前端模型测试 | 表单校验、协议转换、编辑回填、页面筛选。 | Vitest |
-| 前端组件测试 | 服务编辑、SSH secret、日志筛选、系统代理来源列表、右侧启动设置、手动目标和配置档。 | Vitest + Testing Library，mock Tauri API |
+| 前端组件测试 | 服务编辑、SSH secret、日志筛选、系统代理配置列表、列表行内启用和配置管理。 | Vitest + Testing Library，mock Tauri API |
 | 前端视觉冒烟 | 中文工作台、服务表格、日志详情和响应式横向溢出。 | Playwright + 浏览器预览 fallback |
-| 安装器 smoke | NSIS 静默安装、安装后启动、SQLite 初始化、安装后 WebView 响应式截图、关闭隐藏到托盘和静默卸载。 | 临时安装目录 + 隔离 app data |
-| WebView smoke | 真实 Tauri release 窗口启动、resize、截图非空和 SQLite 初始化。 | Win32 窗口控制 + 隔离 app data |
-| Tray smoke | 真实 Tauri release 主窗口完成 SQLite 初始化后，关闭请求隐藏到托盘且进程不退出。 | Win32 窗口控制 + 隔离 app data |
+| 安装器 smoke | NSIS 静默安装、安装后启动、SQLite 初始化、安装后 WebView 响应式截图、关闭隐藏到托盘和静默卸载。 | 临时安装目录 + 隔离数据目录 |
+| WebView smoke | 真实 Tauri release 窗口启动、resize、截图非空和 SQLite 初始化。 | Win32 窗口控制 + 隔离数据目录 |
+| Tray smoke | 真实 Tauri release 主窗口完成 SQLite 初始化后，关闭请求隐藏到托盘且进程不退出。 | Win32 窗口控制 + 隔离数据目录 |
 | 人工验收 | 系统代理、打包安装和跨平台行为。 | 记录步骤、环境、结果 |
 
 ## 可选 gated 集成测试
 
 - Windows 系统代理真实注册表 roundtrip 默认跳过，显式设置 `NET_POWER_SYSTEM_PROXY_TEST=1` 后执行；测试会快照并恢复当前用户的 `ProxyEnable`、`ProxyServer` 和 `ProxyOverride`。
 - 外部 SSH 集成测试默认跳过，显式设置 `NET_POWER_SSH_TEST=1` 后连接真实 SSH server。
-- Release smoke 会启动 `src-tauri/target/release/net-power.exe`，通过 `NET_POWER_APP_DATA_DIR` 使用临时 app data，确认 `proxy-tool.db` 是有效 SQLite 文件后终止进程并清理临时目录。
-- Installer smoke 会拒绝在已有 net-power 安装记录时运行，避免修改用户现有安装；正常运行时只使用临时安装目录和隔离 app data，启动安装后的 exe 验证 SQLite 初始化，再复用 WebView smoke 验证安装后 exe 的桌面宽度/390px 窄宽度截图，复用 Tray smoke 验证关闭隐藏到托盘，并在结束后清理安装文件、进程和临时注册表记录。
-- WebView smoke 会短暂打开真实 release 窗口，移动到屏幕左上角附近，分别调整到桌面宽度和 390px 窄宽度并截图；脚本结束后清理进程、截图和临时 app data。
-- Tray smoke 会短暂打开真实 release 窗口，等待隔离 app data 的 SQLite 初始化成功后向主窗口发送关闭请求，确认窗口隐藏且进程仍存活；脚本结束后清理进程和临时 app data。
+- Release smoke 会启动 `src-tauri/target/release/net-power.exe`，通过 `NET_POWER_APP_DATA_DIR` 使用临时数据目录，确认 `proxy-tool.db` 是有效 SQLite 文件后终止进程并清理临时目录。
+- Installer smoke 会拒绝在已有 net-power 安装记录时运行，避免修改用户现有安装；正常运行时只使用临时安装目录和隔离数据目录，启动安装后的 exe 验证 SQLite 初始化，再复用 WebView smoke 验证安装后 exe 的桌面宽度/390px 窄宽度截图，复用 Tray smoke 验证关闭隐藏到托盘，并在结束后清理安装文件、进程和临时注册表记录。
+- WebView smoke 会短暂打开真实 release 窗口，移动到屏幕左上角附近，分别调整到桌面宽度和 390px 窄宽度并截图；脚本结束后清理进程、截图和临时数据目录。
+- Tray smoke 会短暂打开真实 release 窗口，等待隔离数据目录的 SQLite 初始化成功后向主窗口发送关闭请求，确认窗口隐藏且进程仍存活；脚本结束后清理进程和临时数据目录。
 
 Windows 系统代理注册表验证：
 
@@ -199,6 +200,10 @@ npm run verify:smoke
 
 服务配置：
 
+- 服务页可从列表打开添加弹框，创建并启动统一 HTTP 工具服务。
+- 服务页启动的 HTTP 工具服务可通过静态目录路径前缀返回文件内容。
+- 服务页启动的 HTTP 工具服务可通过接口路由返回配置的状态码、Content-Type 和手写或文件响应内容。
+- 服务页暂停工具服务后，原端口可再次使用，配置仍留在列表中。
 - 新增、编辑、复制、删除服务可保存到 SQLite。
 - 启动服务后状态变为 Running。
 - 停止服务后状态变为 Stopped。
@@ -242,7 +247,7 @@ SSH SOCKS5：
 
 Windows 系统代理：
 
-- 可从统一来源列表选择 HTTP forward proxy，必要时先启动服务再设置为系统代理。
+- 可从代理配置列表选择 HTTP forward proxy，必要时先启动服务再设置为系统代理。
 - 可保存、编辑、启用和删除系统代理配置档。
 - 可一键清理系统代理。
 - 设置失败时 UI 展示明确错误。

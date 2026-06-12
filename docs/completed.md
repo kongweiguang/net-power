@@ -4,6 +4,7 @@
 
 - SQLite migration、默认设置和核心表结构。
 - 服务 CRUD、复制、软删除、启动、停止、重启、运行态查询。
+- 服务页新增可持久化 HTTP 工具服务：以配置列表为入口，通过弹框创建并启动服务，支持静态目录挂载、多接口响应、手写响应体或本地响应文件，具备启动/暂停单按钮、显式删除、端口冲突保护、目录/文件访问校验和暂停后配置保留。
 - HTTP reverse proxy、header set/remove、JSON/form body rewrite、chunked 请求体解码后改写、HTTP/1.1 keep-alive 顺序复用。
 - HTTP forward proxy 和 HTTPS CONNECT；普通 HTTP 请求支持同一客户端连接内的 keep-alive 顺序复用。
 - TCP forward、UDP forward。
@@ -22,22 +23,22 @@
 - 应用更新接入 Tauri updater 和 process 插件，设置页可从 GitHub Releases 检查、下载、安装更新并尝试重启应用。
 - GitHub Actions release workflow 已配置 Windows NSIS、macOS Intel/Apple Silicon DMG、Linux AppImage/DEB 多平台构建，并上传 updater `latest.json`。
 - 应用启动后的服务自动启动选择逻辑已抽成可测试函数：只有全局 `services.auto_start_enabled=true` 且服务自身 enabled + auto_start 时才会进入启动队列。
-- 仪表盘、HTTP、端口转发、SSH、系统代理、设置工作台；HTTP、端口转发和 SSH 独立展示已保存配置列表。
+- 仪表盘、服务、转发、SSH、系统代理、设置工作台；服务页展示已保存工具服务，转发页统一展示 HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 已保存配置列表，SSH 独立展示已保存隧道配置列表。
 - 服务编辑、SSH 配置编辑、结构化 Header/Body 规则编辑、配置日志筛选、事件刷新。
 - HTTP reverse 请求超时、最大可改写 body、跳过压缩 body，HTTP forward/TCP/UDP 超时字段已在 UI 和协议转换中可编辑。
 - SSH known_hosts 路径、连接超时、keepalive 间隔已在 UI、协议转换和编辑回填中可编辑。
 - 每个服务配置行可打开日志弹框，按级别、协议、关键词、时间范围筛选当前配置日志，并展示压缩后的 meta JSON。
 - 日志弹框支持流量详情面板，按日志行展示连接级抓包元数据、中文字段和完整 meta JSON。
-- 系统代理支持 HTTP 正向代理服务和常用配置档统一列表，右侧可启动并设置对应代理；同时支持手动填写 host/port/bypass，以及保存/编辑/删除常用系统代理配置档。
+- 系统代理页简化为代理配置列表，支持添加、编辑、删除常用 host/port/bypass，并在列表行内启用；HTTP 正向代理服务也可在同一列表中启动并启用。
 - HTTP body rewrite 路径未命中、压缩 body 跳过和大小限制会产生 warning 日志。
 - HTTP reverse 支持客户端 `Transfer-Encoding: chunked` 请求体，转发上游前会解码并重算 `Content-Length`。
 - HTTP reverse/forward 支持 HTTP/1.1 keep-alive 顺序请求复用；CONNECT 建立隧道后仍按独立 TCP 隧道生命周期处理。
 - 后台服务任务异常退出会显示 Failed，重新启动时会清理旧任务状态。
 - Rust 后端会向前端推送 `service://connection`，连接事件会触发工作台刷新。
 - 工作台中文化、参考 Apple HIG 和 Obsidian 的浅色系统风格、工具台配色重做、自定义系统标题栏和响应式布局优化；服务表格在窄窗口转为卡片式行，Playwright 已覆盖桌面、平板和 390px 窄屏视觉冒烟。
-- Tauri 主窗口默认以 1280x720 居中打开并直接展开完整桌面工作台，最小宽度仍支持 390px；release WebView smoke 已覆盖真实窗口启动尺寸、桌面宽度和 390px 窄宽度 resize 截图。
+- Tauri 主窗口默认以 1440x900 居中打开并直接展开更舒展的完整桌面工作台，最小宽度仍支持 390px；release WebView smoke 已覆盖真实窗口启动尺寸、桌面宽度和 390px 窄宽度 resize 截图。
 - Workbench 模型 Vitest 单元测试。
-- Workbench 组件级 Testing Library 测试，覆盖弹框新增/编辑服务、SSH secret、配置日志时间范围/meta 筛选、流量详情、系统代理来源列表、右侧启动设置、手动目标和配置档管理。
+- Workbench 组件级 Testing Library 测试，覆盖弹框新增/编辑服务、SSH secret、配置日志时间范围/meta 筛选、流量详情、系统代理配置列表行内启用和配置管理。
 - Playwright 工作台视觉冒烟测试，覆盖浏览器预览模式示例服务、配置日志详情弹框、中文导航和页面级横向溢出。
 - Workbench 设置页组件测试覆盖开机启动应用开关和应用更新检查入口。
 - service_events 与 connection_events 合并日志查询、protocol/time range 筛选和清理测试。
@@ -60,11 +61,12 @@
 - HTTP keep-alive 单连接双请求回归测试，覆盖响应 `Connection` 头和两条连接事件记录。
 - UDP 多客户端请求/响应映射、客户端目标 socket 复用和 idle 清理自动化测试。
 - ServiceManager start/stop 生命周期、运行态端口冲突、异常退出失败态、失败后重启和停止后端口释放测试。
+- ToolServiceManager 统一 HTTP 服务的静态目录、内联接口响应和文件接口响应 socket 级回归测试。
 - TCP/UDP 底层端口占用冲突和释放后复用测试。
 - 可选外部 SSH 集成测试已通过：`external_ssh_password_auth_and_direct_tcpip_bridge`、`external_ssh_private_key_passphrase_auth`、`external_ssh_remote_forward_reaches_local_target`、`external_ssh_socks5_dynamic_proxy_reaches_remote_target`、`external_ssh_strict_known_hosts_rejects_changed_host_key`。
 - `npm test`、`npm run test:visual`、`npm run build`、`cargo fmt --check`、`cargo check`、`cargo test`、`cargo clippy -- -D warnings` 已通过。
 - `npm run tauri -- build` 已通过，生成 Windows MSI 和 NSIS 安装包。
-- `npm run verify:release` 已通过，验证 release exe 可启动并在隔离 app data 下初始化 `proxy-tool.db`。
+- `npm run verify:release` 已通过，验证 release exe 可启动并在隔离数据目录下初始化 `proxy-tool.db`。
 - `npm run verify:installer` 已通过，验证 NSIS 安装包可静默安装到临时目录、启动安装后的 exe、初始化隔离 SQLite、安装后 WebView 响应式截图、关闭隐藏到托盘，并可静默卸载。
 - `npm run verify:webview` 已通过，验证真实 Tauri release 窗口可启动、resize、截取非空截图并初始化隔离 SQLite。
 - `npm run verify:tray` 已通过，验证真实 Tauri release 主窗口收到关闭请求后隐藏到托盘并保持进程存活。

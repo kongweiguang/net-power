@@ -8,6 +8,7 @@ net-power 是面向开发、调试和日常网络切换的桌面代理管理工�
 
 - 启动后直接进入工作台，用户可以新增、编辑、复制、删除、启动、停止和重启代理服务。
 - 支持同时运行多个本地代理服务，并在仪表盘和列表中展示运行状态、连接数、字节统计和最近错误。
+- 支持从服务页创建并启动统一 HTTP 工具服务，单个服务可同时挂载静态目录和多条接口响应，暂停后配置仍保留。
 - 所有服务配置、规则、SSH Profile、系统代理配置档、运行事件和连接事件都持久化到 SQLite。
 - 应用重启后恢复服务配置；当全局服务自动启动和单个服务 `auto_start` 同时开启时，应用启动后自动恢复对应服务。
 - 系统代理、托盘常驻、开机启动、日志筛选和发布 smoke 形成完整桌面应用体验。
@@ -26,6 +27,7 @@ net-power 是面向开发、调试和日常网络切换的桌面代理管理工�
 
 - HTTP Reverse：固定上游转发、request/response header set/remove、JSON/form body rewrite、chunked 请求体解码、HTTP/1.1 keep-alive 顺序复用。
 - HTTP Forward：普通 HTTP 代理和 HTTPS CONNECT，普通 HTTP 请求支持 keep-alive 顺序复用。
+- Tool Services：可持久化的本地 HTTP 服务，可挂载静态目录和接口响应，运行态可启动或暂停。
 - TCP Forward 与 UDP Forward：本地监听到目标地址转发，包含连接统计、idle 清理和端口释放。
 - SSH：Profile 加密存储、password/private key/agent 认证、local forward、remote forward、SOCKS5 动态代理、known_hosts 校验、跳板链、多级跳板和 remote 自动重连。
 - System Proxy：Windows、macOS、Linux 平台系统代理设置/清理/状态读取，Linux 同步维护 shell 代理环境文件。
@@ -44,20 +46,20 @@ net-power 是面向开发、调试和日常网络切换的桌面代理管理工�
 
 ## 信息架构
 
-主工作台按“仪表盘、HTTP、端口转发、SSH、系统代理、设置”组织。HTTP、端口转发和 SSH 独立展示已保存配置列表，新增和编辑配置通过弹框完成。
+主工作台按“仪表盘、服务、转发、SSH、系统代理、设置”组织。服务页以列表展示已保存 HTTP 工具服务，新增服务通过弹框配置并可立即启动；转发页统一展示 HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 已保存配置，SSH 页独立管理 SSH Profile 与隧道，新增和编辑配置通过弹框完成。
 
 | 页面 | 核心任务 |
 | --- | --- |
 | 仪表盘 | 查看运行概览、系统代理状态、最近错误和服务列表。 |
-| HTTP | 查看、启动、修改、删除 HTTP Reverse / HTTP Forward 服务，并通过弹框维护 header/body rewrite 规则和超时参数。 |
-| 端口转发 | 查看、启动、修改、删除 TCP/UDP 转发服务，并通过弹框维护目标地址、超时和 idle 清理。 |
+| 服务 | 以列表查看已保存 HTTP 工具服务，通过弹框配置静态目录和接口响应，并用同一按钮启动或暂停。 |
+| 转发 | 查看、启动、修改、删除 HTTP Reverse / HTTP Forward / TCP Forward / UDP Forward 服务，并通过弹框维护 rewrite 规则、目标地址、超时和 idle 清理。 |
 | SSH | 管理 SSH Profile、local/remote/SOCKS5 隧道、known_hosts、跳板和 keepalive。 |
-| 系统代理 | 选择 running HTTP Forward、手动目标或配置档并设置/清理系统代理。 |
+| 系统代理 | 从代理配置列表添加、选择、启用或清理系统代理，HTTP Forward 服务可在列表行内启动并启用。 |
 | 设置 | 管理开机启动应用和应用启动后的服务自动启动策略。 |
 
 ## 数据与配置原则
 
-- SQLite 是唯一持久化配置来源，数据库文件为 `proxy-tool.db`，默认放在 Tauri `app_data_dir()`。
+- SQLite 是唯一持久化配置来源，数据库文件为 `proxy-tool.db`，默认放在用户目录 `~/.net-power` 下。
 - Rust 后端负责数据库读写、事务、校验、敏感数据引用和服务生命周期。
 - 前端只负责展示、表单、筛选、事件监听和调用封装后的 Tauri Command。
 - SSH 密码、私钥 passphrase 和未来 token 只以 secret id 关联业务记录，明文不回传到前端。
@@ -68,7 +70,8 @@ net-power 是面向开发、调试和日常网络切换的桌面代理管理工�
 功能验收：
 
 - 用户能在图形界面里完成代理服务配置，不需要命令行。
-- 新增、编辑、复制、删除服务可保存到 SQLite，重启应用后配置仍存在。
+- 用户能在服务页快速创建、启动和暂停本地 HTTP 文件服务和接口响应服务，不需要命令行参数。
+- 新增、编辑、复制、删除代理服务和新增、删除工具服务可保存到 SQLite，重启应用后配置仍存在。
 - HTTP Reverse、HTTP Forward、CONNECT、TCP、UDP、SSH local/remote/SOCKS5 都能端到端转发。
 - Header rewrite、JSON/form body rewrite、chunked body rewrite、keep-alive 和日志记录符合业务文档。
 - Windows/macOS/Linux 系统代理后端具备设置、清理和状态读取能力。

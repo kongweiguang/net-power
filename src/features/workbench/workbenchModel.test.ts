@@ -8,11 +8,14 @@ import type { CreateServiceInput, ServiceDetail, ServiceSummary, SshProfile } fr
 import {
   defaultServiceDraft,
   defaultSshDraft,
+  defaultToolServiceRouteDraft,
+  defaultToolServiceDraft,
   filterServicesByPage,
   formatBytes,
   pageForServiceKind,
   parseServiceDraft,
   parseSshDraft,
+  parseToolServiceDraft,
   serviceDetailToDraft,
   sshProfileToDraft,
 } from "./workbenchModel";
@@ -215,6 +218,83 @@ describe("workbenchModel", () => {
     });
   });
 
+  it("maps local tool service drafts into runtime start inputs", () => {
+    expect(parseToolServiceDraft({ ...defaultToolServiceDraft, name: "" })).toContain("服务名称");
+    expect(parseToolServiceDraft({ ...defaultToolServiceDraft, name: "Empty", routes: [] })).toContain(
+      "静态目录或一个接口",
+    );
+    const staticInput = expectToolServiceInput(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "Static",
+        staticPathPrefix: "public/",
+        staticRootDir: " C:/site ",
+        routes: [],
+      }),
+    );
+    expect(staticInput).toMatchObject({
+      name: "Static",
+      staticPathPrefix: "/public",
+      staticRootDir: "C:/site",
+      routes: [],
+    });
+
+    const httpInput = expectToolServiceInput(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "HTTP",
+        port: "18081",
+        routes: [
+          {
+            ...defaultToolServiceRouteDraft,
+            path: "api/ping",
+            responseStatus: "201",
+            body: "{\"ok\":true}",
+          },
+        ],
+      }),
+    );
+    expect(httpInput).toMatchObject({
+      name: "HTTP",
+      port: 18081,
+      staticRootDir: null,
+      routes: [
+        {
+          method: "GET",
+          path: "/api/ping",
+          responseStatus: 201,
+          contentSource: "inline",
+          body: "{\"ok\":true}",
+          filePath: null,
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid local tool service status and JSON body", () => {
+    expect(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "bad",
+        routes: [{ ...defaultToolServiceRouteDraft, responseStatus: "700" }],
+      }),
+    ).toContain("响应状态码");
+    expect(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "bad",
+        routes: [{ ...defaultToolServiceRouteDraft, body: "{broken" }],
+      }),
+    ).toContain("合法 JSON");
+    expect(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "bad",
+        routes: [{ ...defaultToolServiceRouteDraft, contentSource: "file", filePath: "" }],
+      }),
+    ).toContain("响应文件");
+  });
+
   it("maps ssh profile drafts without leaking existing secrets", () => {
     expect(parseSshDraft({ ...defaultSshDraft, name: "key", host: "dev", username: "root", authType: "private_key" }))
       .toContain("私钥认证");
@@ -382,15 +462,23 @@ describe("workbenchModel", () => {
   it("filters services by current page and formats runtime values", () => {
     const services: ServiceSummary[] = [
       service("http_reverse", "http"),
+      service("http_forward", "forward"),
       service("tcp_forward", "tcp"),
+      service("udp_forward", "udp"),
       service("ssh_local", "ssh"),
       service("ssh_remote", "remote"),
       service("ssh_socks", "socks"),
     ];
 
-    expect(filterServicesByPage(services, "http").map((item) => item.id)).toEqual(["http"]);
-    expect(filterServicesByPage(services, "forwarding").map((item) => item.id)).toEqual(["tcp"]);
+    expect(filterServicesByPage(services, "forwarding").map((item) => item.id)).toEqual([
+      "http",
+      "forward",
+      "tcp",
+      "udp",
+    ]);
     expect(filterServicesByPage(services, "ssh").map((item) => item.id)).toEqual(["ssh", "remote", "socks"]);
+    expect(pageForServiceKind("http_reverse")).toBe("forwarding");
+    expect(pageForServiceKind("http_forward")).toBe("forwarding");
     expect(pageForServiceKind("udp_forward")).toBe("forwarding");
     expect(pageForServiceKind("ssh_remote")).toBe("ssh");
     expect(pageForServiceKind("ssh_socks")).toBe("ssh");
@@ -399,6 +487,13 @@ describe("workbenchModel", () => {
 });
 
 function expectCreateServiceInput(value: ReturnType<typeof parseServiceDraft>): CreateServiceInput {
+  if (typeof value === "string") {
+    throw new Error(value);
+  }
+  return value;
+}
+
+function expectToolServiceInput(value: ReturnType<typeof parseToolServiceDraft>) {
   if (typeof value === "string") {
     throw new Error(value);
   }

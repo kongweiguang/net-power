@@ -79,6 +79,152 @@ pub enum RuntimeStatus {
     Failed { message: String },
 }
 
+/// 工具 HTTP 服务接口响应内容来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolServiceContentSource {
+    /// 使用前端表单内填写的响应体。
+    Inline,
+    /// 从本地文件读取响应体。
+    File,
+}
+
+impl ToolServiceContentSource {
+    /// 返回数据库中持久化使用的 snake_case 值。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::File => "file",
+        }
+    }
+}
+
+impl TryFrom<&str> for ToolServiceContentSource {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "inline" => Ok(Self::Inline),
+            "file" => Ok(Self::File),
+            _ => Err(format!("未知工具服务响应来源: {value}")),
+        }
+    }
+}
+
+/// 工具 HTTP 服务接口路由输入。创建配置时会写入 SQLite，启动时进入运行态。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolServiceRouteInput {
+    /// HTTP 方法，支持 GET、POST、PUT、PATCH、DELETE、HEAD、OPTIONS 或 ANY。
+    pub method: String,
+    /// 精确匹配的请求路径，不包含 query。
+    pub path: String,
+    /// 响应状态码。
+    pub response_status: u16,
+    /// 响应 Content-Type。
+    pub content_type: String,
+    /// 响应体来源。
+    pub content_source: ToolServiceContentSource,
+    /// 手写响应体，仅 content_source 为 inline 时使用。
+    pub body: Option<String>,
+    /// 响应文件路径，仅 content_source 为 file 时使用。
+    pub file_path: Option<String>,
+}
+
+/// 本地工具 HTTP 服务配置输入。创建后会写入 SQLite，启动和暂停只影响运行态。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolServiceInput {
+    /// 用户可读服务名称。
+    pub name: String,
+    /// 监听主机。
+    pub host: String,
+    /// 监听端口。
+    pub port: u16,
+    /// 静态目录路径；为空表示不挂载静态文件。
+    pub static_root_dir: Option<String>,
+    /// 静态目录挂载路径前缀。
+    pub static_path_prefix: String,
+    /// 接口路由列表，按数组顺序匹配。
+    #[serde(default)]
+    pub routes: Vec<ToolServiceRouteInput>,
+}
+
+/// 已持久化的本地工具 HTTP 服务配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolServiceConfig {
+    /// 服务主键。
+    pub id: String,
+    /// 用户可读服务名称。
+    pub name: String,
+    /// 监听主机。
+    pub host: String,
+    /// 监听端口。
+    pub port: u16,
+    /// 静态目录路径；为空表示不挂载静态文件。
+    pub static_root_dir: Option<String>,
+    /// 静态目录挂载路径前缀。
+    pub static_path_prefix: String,
+    /// 接口路由列表，按数组顺序匹配。
+    pub routes: Vec<ToolServiceRouteInput>,
+    /// 创建时间，SQLite datetime 字符串。
+    pub created_at: String,
+    /// 更新时间，SQLite datetime 字符串。
+    pub updated_at: String,
+}
+
+impl ToolServiceConfig {
+    /// 转成运行态启动所需的输入结构。
+    pub fn to_input(&self) -> ToolServiceInput {
+        ToolServiceInput {
+            name: self.name.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            static_root_dir: self.static_root_dir.clone(),
+            static_path_prefix: self.static_path_prefix.clone(),
+            routes: self.routes.clone(),
+        }
+    }
+
+    /// 第一个可访问路径，用于展示访问 URL。
+    pub fn first_access_path(&self) -> &str {
+        self.static_root_dir
+            .as_ref()
+            .map(|_| self.static_path_prefix.as_str())
+            .or_else(|| self.routes.first().map(|route| route.path.as_str()))
+            .unwrap_or("/")
+    }
+}
+
+/// 本地工具 HTTP 服务列表摘要。配置来自 SQLite，运行态来自内存管理器。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolServiceSummary {
+    /// 服务主键。
+    pub id: String,
+    /// 用户可读服务名称。
+    pub name: String,
+    /// 监听主机。
+    pub host: String,
+    /// 监听端口。
+    pub port: u16,
+    /// 可直接访问的本地 URL。
+    pub url: String,
+    /// 静态目录路径，未挂载时为空。
+    pub static_root_dir: Option<String>,
+    /// 静态目录挂载路径前缀。
+    pub static_path_prefix: String,
+    /// 已配置接口路由数量。
+    pub route_count: usize,
+    /// 启动时间；已暂停服务为空。
+    pub started_at: Option<String>,
+    /// 累计请求数。
+    pub total_requests: u64,
+    /// 运行态。
+    pub runtime_status: RuntimeStatus,
+}
+
 /// 服务列表行，前端 Dashboard 和各类型页面共用。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

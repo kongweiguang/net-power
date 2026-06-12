@@ -48,11 +48,156 @@ pub struct RunningService {
     pub counters: Arc<ServiceCounters>,
 }
 
+/// 已退出或停止失败服务的状态快照。
+#[derive(Clone, Debug)]
+pub(crate) struct FailedService {
+    /// 服务类型，用于前端按真实类型展示失败态。
+    kind: ServiceKind,
+    /// 失败前的监听地址。
+    listen_addr: String,
+    /// 用户可见失败原因。
+    message: String,
+}
+
+impl FailedService {
+    fn from_runtime(kind: ServiceKind, listen_addr: &str, message: String) -> Self {
+        Self {
+            kind,
+            listen_addr: listen_addr.to_string(),
+            message,
+        }
+    }
+}
+
+impl RunningService {
+    fn to_failed(&self, message: String) -> FailedService {
+        FailedService::from_runtime(self.kind, &self.listen_addr, message)
+    }
+}
+
+/// 已从运行态表取出的停止任务。
+pub(crate) struct StoppingService {
+    service_id: String,
+    kind: ServiceKind,
+    listen_addr: String,
+    handle: JoinHandle<()>,
+}
+
+/// 后台任务停止后的结果，供调用方在释放锁后写回失败态。
+pub(crate) struct StopOutcome {
+    service_id: String,
+    status: RuntimeStatus,
+    failed: Option<FailedService>,
+}
+
+impl StopOutcome {
+    /// 返回需要暴露给前端的运行态。
+    pub(crate) fn status(&self) -> RuntimeStatus {
+        self.status.clone()
+    }
+}
+
+impl StoppingService {
+    pub(crate) async fn wait<R: Runtime>(
+        self,
+        db: Arc<Database>,
+        app: AppHandle<R>,
+    ) -> AppResult<StopOutcome> {
+        match timeout(Duration::from_secs(5), self.handle).await {
+            Ok(joined) => {
+                if let Err(err) = joined {
+                    let message = format!("服务停止时任务异常: {err}");
+                    db.insert_service_event(Some(&self.service_id), "error", &message, "{}")?;
+                    return Ok(StopOutcome {
+                        service_id: self.service_id,
+                        status: RuntimeStatus::Failed {
+                            message: message.clone(),
+                        },
+                        failed: Some(FailedService::from_runtime(
+                            self.kind,
+                            &self.listen_addr,
+                            message,
+                        )),
+                    });
+                }
+            }
+            Err(_) => {
+                let message = "服务停止超时，后台任务可能仍在退出".to_string();
+                db.insert_service_event(Some(&self.service_id), "error", &message, "{}")?;
+                return Ok(StopOutcome {
+                    service_id: self.service_id,
+                    status: RuntimeStatus::Failed {
+                        message: message.clone(),
+                    },
+                    failed: Some(FailedService::from_runtime(
+                        self.kind,
+                        &self.listen_addr,
+                        message,
+                    )),
+                });
+            }
+        }
+
+        db.insert_service_event(Some(&self.service_id), "info", "服务已停止", "{}")?;
+        let _ = app.emit("service://status-changed", &self.service_id);
+        Ok(StopOutcome {
+            service_id: self.service_id,
+            status: RuntimeStatus::Stopped,
+            failed: None,
+        })
+    }
+
+    #[cfg(test)]
+    async fn wait_for_test(self, db: Arc<Database>) -> AppResult<StopOutcome> {
+        match timeout(Duration::from_secs(5), self.handle).await {
+            Ok(joined) => {
+                if let Err(err) = joined {
+                    let message = format!("服务停止时任务异常: {err}");
+                    db.insert_service_event(Some(&self.service_id), "error", &message, "{}")?;
+                    return Ok(StopOutcome {
+                        service_id: self.service_id,
+                        status: RuntimeStatus::Failed {
+                            message: message.clone(),
+                        },
+                        failed: Some(FailedService::from_runtime(
+                            self.kind,
+                            &self.listen_addr,
+                            message,
+                        )),
+                    });
+                }
+            }
+            Err(_) => {
+                let message = "服务停止超时，后台任务可能仍在退出".to_string();
+                db.insert_service_event(Some(&self.service_id), "error", &message, "{}")?;
+                return Ok(StopOutcome {
+                    service_id: self.service_id,
+                    status: RuntimeStatus::Failed {
+                        message: message.clone(),
+                    },
+                    failed: Some(FailedService::from_runtime(
+                        self.kind,
+                        &self.listen_addr,
+                        message,
+                    )),
+                });
+            }
+        }
+
+        db.insert_service_event(Some(&self.service_id), "info", "服务已停止", "{}")?;
+        Ok(StopOutcome {
+            service_id: self.service_id,
+            status: RuntimeStatus::Stopped,
+            failed: None,
+        })
+    }
+}
+
 /// 代理服务运行时管理器。
 #[derive(Default)]
 pub struct ServiceManager {
     running: HashMap<String, RunningService>,
-    failed: HashMap<String, String>,
+    failed: HashMap<String, FailedService>,
 }
 
 impl ServiceManager {
@@ -139,38 +284,6 @@ impl ServiceManager {
         Ok(RuntimeStatus::Running)
     }
 
-    /// 停止服务。
-    pub async fn stop_service<R: Runtime>(
-        &mut self,
-        service_id: &str,
-        db: Arc<Database>,
-        app: AppHandle<R>,
-    ) -> AppResult<RuntimeStatus> {
-        let Some(running) = self.running.remove(service_id) else {
-            return Ok(RuntimeStatus::Stopped);
-        };
-        running.cancel.cancel();
-        match timeout(Duration::from_secs(5), running.handle).await {
-            Ok(joined) => {
-                if let Err(err) = joined {
-                    let message = format!("服务停止时任务异常: {err}");
-                    self.failed.insert(service_id.to_string(), message.clone());
-                    db.insert_service_event(Some(service_id), "error", &message, "{}")?;
-                    return Ok(RuntimeStatus::Failed { message });
-                }
-            }
-            Err(_) => {
-                let message = "服务停止超时，后台任务可能仍在退出".to_string();
-                self.failed.insert(service_id.to_string(), message.clone());
-                db.insert_service_event(Some(service_id), "error", &message, "{}")?;
-                return Ok(RuntimeStatus::Failed { message });
-            }
-        }
-        db.insert_service_event(Some(service_id), "info", "服务已停止", "{}")?;
-        let _ = app.emit("service://status-changed", service_id);
-        Ok(RuntimeStatus::Stopped)
-    }
-
     /// 查询某个服务运行态。
     pub fn runtime_status(&self, service_id: &str) -> RuntimeStatus {
         if let Some(service) = self.running.get(service_id) {
@@ -181,9 +294,9 @@ impl ServiceManager {
             } else {
                 RuntimeStatus::Running
             }
-        } else if let Some(message) = self.failed.get(service_id) {
+        } else if let Some(failed) = self.failed.get(service_id) {
             RuntimeStatus::Failed {
-                message: message.clone(),
+                message: failed.message.clone(),
             }
         } else {
             RuntimeStatus::Stopped
@@ -216,12 +329,12 @@ impl ServiceManager {
         statuses.extend(
             self.failed
                 .iter()
-                .map(|(service_id, message)| ServiceRuntimeSummary {
+                .map(|(service_id, failed)| ServiceRuntimeSummary {
                     service_id: service_id.clone(),
-                    kind: ServiceKind::HttpForward,
-                    listen_addr: String::new(),
+                    kind: failed.kind,
+                    listen_addr: failed.listen_addr.clone(),
                     runtime_status: RuntimeStatus::Failed {
-                        message: message.clone(),
+                        message: failed.message.clone(),
                     },
                     started_at: None,
                     active_connections: 0,
@@ -246,15 +359,37 @@ impl ServiceManager {
             .unwrap_or((0, 0))
     }
 
+    /// 从运行态表中取出服务并触发取消；调用方随后可在不持锁的情况下等待任务退出。
+    pub(crate) fn begin_stop_service(&mut self, service_id: &str) -> Option<StoppingService> {
+        let running = self.running.remove(service_id)?;
+        running.cancel.cancel();
+        Some(StoppingService {
+            service_id: service_id.to_string(),
+            kind: running.kind,
+            listen_addr: running.listen_addr,
+            handle: running.handle,
+        })
+    }
+
+    /// 写回停止任务产生的失败态。
+    pub(crate) fn complete_stop(&mut self, outcome: StopOutcome) {
+        if let Some(failed) = outcome.failed {
+            self.failed.insert(outcome.service_id, failed);
+        }
+    }
+
     fn reap_finished(&mut self, service_id: &str) {
         if self
             .running
             .get(service_id)
             .is_some_and(|service| service.handle.is_finished())
         {
-            self.running.remove(service_id);
-            self.failed
-                .insert(service_id.to_string(), "服务任务已退出".to_string());
+            if let Some(service) = self.running.remove(service_id) {
+                self.failed.insert(
+                    service_id.to_string(),
+                    service.to_failed("服务任务已退出".to_string()),
+                );
+            }
         }
     }
 
@@ -319,28 +454,13 @@ impl ServiceManager {
         service_id: &str,
         db: Arc<Database>,
     ) -> AppResult<RuntimeStatus> {
-        let Some(running) = self.running.remove(service_id) else {
+        let Some(stopping) = self.begin_stop_service(service_id) else {
             return Ok(RuntimeStatus::Stopped);
         };
-        running.cancel.cancel();
-        match timeout(Duration::from_secs(5), running.handle).await {
-            Ok(joined) => {
-                if let Err(err) = joined {
-                    let message = format!("服务停止时任务异常: {err}");
-                    self.failed.insert(service_id.to_string(), message.clone());
-                    db.insert_service_event(Some(service_id), "error", &message, "{}")?;
-                    return Ok(RuntimeStatus::Failed { message });
-                }
-            }
-            Err(_) => {
-                let message = "服务停止超时，后台任务可能仍在退出".to_string();
-                self.failed.insert(service_id.to_string(), message.clone());
-                db.insert_service_event(Some(service_id), "error", &message, "{}")?;
-                return Ok(RuntimeStatus::Failed { message });
-            }
-        }
-        db.insert_service_event(Some(service_id), "info", "服务已停止", "{}")?;
-        Ok(RuntimeStatus::Stopped)
+        let outcome = stopping.wait_for_test(db).await?;
+        let status = outcome.status();
+        self.complete_stop(outcome);
+        Ok(status)
     }
 }
 
@@ -508,6 +628,39 @@ mod tests {
             .expect("释放后的 UDP 端口应可再次监听");
     }
 
+    #[tokio::test]
+    async fn failed_runtime_summary_keeps_service_kind_and_listen_addr() {
+        let listen_port = reserve_tcp_port();
+        let listen_addr = format!("127.0.0.1:{listen_port}");
+        let db = Arc::new(Database::in_memory().expect("内存数据库应初始化"));
+        let mut manager = ServiceManager::new();
+        let detail = db
+            .create_service(&tcp_forward_input("svc-failed-summary", listen_port))
+            .expect("测试服务应可写入数据库");
+
+        manager
+            .start_service_for_test(detail.clone(), Arc::clone(&db), panic_runner)
+            .await
+            .expect("测试服务应可启动");
+        let stopped = manager
+            .stop_service_for_test(&detail.id, Arc::clone(&db))
+            .await
+            .expect("停止失败也应返回运行态而不是传播 JoinError");
+
+        assert!(matches!(stopped, RuntimeStatus::Failed { .. }));
+        let summary = manager
+            .list_runtime_status()
+            .into_iter()
+            .find(|item| item.service_id == detail.id)
+            .expect("失败服务应保留在运行态摘要中");
+        assert_eq!(summary.kind, ServiceKind::TcpForward);
+        assert_eq!(summary.listen_addr, listen_addr);
+        assert!(matches!(
+            summary.runtime_status,
+            RuntimeStatus::Failed { .. }
+        ));
+    }
+
     fn tcp_forward_detail(id: &str, listen_port: u16) -> ServiceDetail {
         ServiceDetail {
             id: id.to_string(),
@@ -598,6 +751,16 @@ mod tests {
         _counters: Arc<ServiceCounters>,
     ) -> JoinHandle<()> {
         tokio::spawn(async {})
+    }
+
+    fn panic_runner(
+        _detail: ServiceDetail,
+        _cancel: CancellationToken,
+        _counters: Arc<ServiceCounters>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async {
+            panic!("测试 runner 主动触发 JoinError");
+        })
     }
 
     fn reserve_tcp_port() -> u16 {

@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "net-power 代理工具",
-        "width": 1280,
-        "height": 720,
+        "width": 1440,
+        "height": 900,
         "minWidth": 390,
-        "minHeight": 520,
+        "minHeight": 640,
         "center": true,
         "resizable": true,
         "decorations": false

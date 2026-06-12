@@ -60,7 +60,7 @@
 | 前端测试与构建 | 当前工作树已重新执行 `npm test`、`npm run build`、`npm run test:visual`；Vitest 23 passed，Playwright 3 passed。 | 已证明 |
 | Tauri 打包 | 当前工作树已重新执行 `npm run tauri -- build`，生成 Windows MSI 和 NSIS 安装包。 | 已证明 |
 | Release/WebView/Tray/Installer smoke | 当前工作树已重新执行 `npm run verify:smoke`，串行通过 release、WebView、tray 和 installer smoke。 | 已证明 |
-| 文档沉淀 | [plan.md](../plan.md) 已降级为历史计划迁移索引；[docs/README.md](README.md) 指向稳定文档。 | 已证明 |
+| 文档沉淀 | [docs/README.md](README.md) 已指向产品、业务、架构、数据、安全、测试、完成态和进行中文档作为稳定事实来源。 | 已证明 |
 
 ## 本轮自动化验证
 

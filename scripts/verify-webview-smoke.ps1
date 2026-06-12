@@ -235,12 +235,12 @@ try {
         throw "Unexpected Tauri window title: $title"
     }
     $initialBounds = Get-WindowBounds -Window $window
-    if ($initialBounds.Width -lt 1180 -or $initialBounds.Height -lt 700) {
+    if ($initialBounds.Width -lt 1340 -or $initialBounds.Height -lt 820) {
         throw "Initial Tauri window is too small for the full workbench: $($initialBounds.Width)x$($initialBounds.Height)"
     }
 
     $sizes = @(
-        @{ Name = "desktop"; Width = 1280; Height = 720 },
+        @{ Name = "desktop"; Width = 1440; Height = 900 },
         @{ Name = "narrow"; Width = 390; Height = 640 }
     )
     foreach ($size in $sizes) {

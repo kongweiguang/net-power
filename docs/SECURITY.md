@@ -15,6 +15,8 @@ net-power 是本地代理工具，会处理网络流量、系统代理、SSH 凭
   "core:window:allow-minimize",
   "core:window:allow-start-dragging",
   "core:window:allow-toggle-maximize",
+  "dialog:default",
+  "dialog:allow-open",
   "opener:default",
   "process:default",
   "updater:default"
@@ -39,6 +41,7 @@ script-src 'self'
 - 当前系统代理能力由 Rust 后端调用平台 API/命令实现，没有向前端暴露 shell 权限。
 - 开机启动能力通过 Rust Command 包装 Tauri autostart 插件，未向前端开放 `plugin:autostart` JS 权限。
 - 应用更新能力仅开放 `updater:default` 和 `process:default`，用于检查/安装更新和安装后重启，不开放 shell 或文件系统权限。
+- 服务页文件夹和响应文件选择仅开放 Tauri dialog open 权限；实际目录和文件读取由 Rust 工具服务在启动时校验，不向前端开放通用 fs 权限。
 
 ## 自动更新安全边界
 
@@ -57,6 +60,8 @@ Rust command 和 database 层会重新校验前端输入：
 - 端口必须在 1 到 65535。
 - 同一运行时监听地址不允许同时运行两个服务；SSH remote 使用 `SSH profile + remote_bind_host + remote_bind_port` 作为远程冲突域。
 - HTTP reverse 的 `target_url` 必须合法。
+- 工具服务端口必须在 1 到 65535；静态目录挂载必须提供可访问文件夹，并在请求解析时拒绝 `.`、`..` 和反斜杠路径穿越。
+- 工具服务接口响应状态码必须在 100 到 599；选择文件作为响应体时，后端只读取已校验的本地文件路径。
 - TCP/UDP/SSH local/SSH remote 目标 host 与 port 必须合法。
 - SSH local、SSH remote 和 SSH SOCKS5 必须引用有效 SSH profile；SSH remote 必须提供远程绑定 host/port；SSH SOCKS5 不接受固定目标配置，目标由客户端 CONNECT 请求决定。
 - SSH Profile 的跳板引用必须指向有效 Profile，数据库层阻止自引用、循环引用和超过 8 级的异常链。
@@ -66,7 +71,7 @@ Rust command 和 database 层会重新校验前端输入：
 
 ## 数据目录覆盖
 
-默认数据库位于 Tauri `app_data_dir()`。`NET_POWER_APP_DATA_DIR` 仅作为测试/验收覆盖入口使用，release smoke 会把它指向临时目录，验证后清理；普通运行不需要设置该变量。
+默认数据库位于用户目录 `~/.net-power/proxy-tool.db`。`NET_POWER_APP_DATA_DIR` 仅作为测试/验收覆盖入口使用，release smoke 会把它指向临时目录，验证后清理；普通运行不需要设置该变量。
 
 ## 敏感数据
 
@@ -121,6 +126,8 @@ SSH remote forward 连接日志只记录 `REMOTE`、远程绑定地址、本地�
 
 配置日志弹框的“流量详情”只展示已经落库的连接元数据和完整 meta JSON，不额外读取或保存 request/response body。完整 payload 抓包如果后续加入，必须以显式开关、脱敏策略和容量限制为前提。
 
+服务页的接口响应配置会写入 SQLite 的工具服务配置表，暂停或退出应用后仍可再次启动；这些手写响应体和本地响应文件路径不写入 `service_events` 或 `connection_events` 日志。
+
 ## 系统代理风险
 
 Windows 系统代理写入当前用户注册表：
@@ -129,7 +136,7 @@ Windows 系统代理写入当前用户注册表：
 HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 ```
 
-当前 UI 支持把 running HTTP forward 服务、手动目标或已保存系统代理配置档设置为系统代理目标，并提供清理按钮。macOS 系统代理通过 `networksetup` 修改当前用户可见网络服务的 HTTP/HTTPS proxy。Linux 优先通过 GNOME `gsettings` 修改桌面代理，并写入 `$XDG_CONFIG_HOME/environment.d/net-power-proxy.conf` 或 `~/.config/environment.d/net-power-proxy.conf`，供新的 shell/登录会话加载代理环境变量。
+当前 UI 支持从代理配置列表把已保存系统代理配置或 HTTP forward 服务设置为系统代理目标，并提供清理按钮。macOS 系统代理通过 `networksetup` 修改当前用户可见网络服务的 HTTP/HTTPS proxy。Linux 优先通过 GNOME `gsettings` 修改桌面代理，并写入 `$XDG_CONFIG_HOME/environment.d/net-power-proxy.conf` 或 `~/.config/environment.d/net-power-proxy.conf`，供新的 shell/登录会话加载代理环境变量。
 
 Windows 注册表写入、状态读取和清理已有 gated 集成测试覆盖，测试会恢复执行前的 `ProxyEnable`、`ProxyServer` 和 `ProxyOverride`。
 

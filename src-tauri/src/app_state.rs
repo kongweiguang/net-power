@@ -3,6 +3,7 @@
 
 use crate::database::Database;
 use crate::manager::ServiceManager;
+use crate::tool_services::ToolServiceManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -12,6 +13,8 @@ pub struct AppState {
     pub db: Arc<Database>,
     /// 服务运行时管理器。
     pub manager: RwLock<ServiceManager>,
+    /// 本地工具服务运行时管理器。
+    pub tool_services: RwLock<ToolServiceManager>,
 }
 
 impl AppState {
@@ -20,6 +23,7 @@ impl AppState {
         Self {
             db: Arc::new(db),
             manager: RwLock::new(ServiceManager::new()),
+            tool_services: RwLock::new(ToolServiceManager::new()),
         }
     }
 }

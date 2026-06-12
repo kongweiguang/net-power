@@ -13,8 +13,7 @@ const viewports = [
 
 const pages = [
   { nav: "仪表盘", heading: "仪表盘" },
-  { nav: "HTTP", heading: "HTTP" },
-  { nav: "端口转发", heading: "端口转发" },
+  { nav: "转发", heading: "转发" },
   { nav: "SSH", heading: "SSH" },
   { nav: "系统代理", heading: "系统代理" },
   { nav: "设置", heading: "设置" },
@@ -37,7 +36,7 @@ test.describe("工作台响应式视觉冒烟", () => {
         await assertNoPageOverflow(page, `${viewport.name}:${item.heading}`);
       }
 
-      await page.getByRole("button", { name: "HTTP", exact: true }).click();
+      await page.getByRole("button", { name: "转发", exact: true }).click();
       await page.getByRole("button", { name: "日志" }).first().click();
       await page.getByRole("button", { name: "详情" }).first().click();
       await expect(page.getByText("完整 meta JSON")).toBeVisible();

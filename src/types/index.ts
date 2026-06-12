@@ -21,6 +21,69 @@ export type RuntimeStatus =
   | { type: "stopping" }
   | { type: "failed"; message: string };
 
+/** 工具 HTTP 服务响应内容来源。 */
+export type ToolServiceContentSource = "inline" | "file";
+
+/** 工具 HTTP 服务接口路由输入。 */
+export interface ToolServiceRouteInput {
+  /** HTTP 方法。 */
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "ANY";
+  /** 精确匹配的请求路径。 */
+  path: string;
+  /** 响应状态码。 */
+  responseStatus: number;
+  /** 响应 Content-Type。 */
+  contentType: string;
+  /** 响应体来源。 */
+  contentSource: ToolServiceContentSource;
+  /** 手写响应体。 */
+  body?: string | null;
+  /** 响应文件路径。 */
+  filePath?: string | null;
+}
+
+/** 本地工具服务配置输入。 */
+export interface ToolServiceInput {
+  /** 用户可读名称。 */
+  name: string;
+  /** 监听主机。 */
+  host: string;
+  /** 监听端口。 */
+  port: number;
+  /** 静态目录路径；为空表示不挂载静态文件。 */
+  staticRootDir?: string | null;
+  /** 静态目录挂载路径前缀。 */
+  staticPathPrefix: string;
+  /** 接口路由列表。 */
+  routes: ToolServiceRouteInput[];
+}
+
+/** 本地工具服务摘要。配置来自 SQLite，运行态来自后端内存管理器。 */
+export interface ToolServiceSummary {
+  /** 服务主键。 */
+  id: string;
+  /** 用户可读名称。 */
+  name: string;
+  /** 监听主机。 */
+  host: string;
+  /** 监听端口。 */
+  port: number;
+  /** 可直接访问的本地 URL。 */
+  url: string;
+  /** 静态目录路径。 */
+  staticRootDir?: string | null;
+  /** 静态目录挂载路径前缀。 */
+  staticPathPrefix: string;
+  /** 接口路由数量。 */
+  routeCount: number;
+  /** 启动时间；已暂停服务为空。 */
+  startedAt?: string | null;
+  /** 累计请求数。 */
+  totalRequests: number;
+  /** 运行态。 */
+  runtimeStatus: RuntimeStatus;
+}
+
 /** HTTP 反向代理配置。 */
 export interface HttpReverseConfig {
   /** 上游基础 URL。 */

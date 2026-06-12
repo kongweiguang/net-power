@@ -2,17 +2,14 @@
 
 # 业务能力
 
-## HTTP
+## 转发
 
 - HTTP Reverse：监听本地端口，转发到固定上游 URL，支持 header 规则和 JSON/form body rewrite。
 - HTTP Reverse 会解码客户端 `Transfer-Encoding: chunked` 请求体，再按规则改写并以明确 `Content-Length` 转发上游。
 - HTTP Reverse 支持 HTTP/1.1 keep-alive，客户端同一 TCP 连接内的多个普通请求会按顺序处理并分别记录连接事件。
-- HTTP 页面使用结构化规则编辑器维护 header set/remove 和 body rewrite，不需要手写整段 JSON。
+- 转发页面使用结构化规则编辑器维护 HTTP header set/remove 和 body rewrite，不需要手写整段 JSON。
 - HTTP 正向代理（Forward）：作为通用 HTTP 代理，支持普通 HTTP 请求和 HTTPS CONNECT。
 - HTTP Forward 普通请求支持 keep-alive 顺序复用；CONNECT 建立隧道后进入字节转发，不和后续 HTTP 请求复用。
-
-## Forwarding
-
 - TCP Forward：本地 TCP 监听到目标 TCP，按连接统计 bytes 和连接数。
 - UDP Forward：本地 UDP 监听到目标 UDP，按客户端地址维护目标 socket，返回数据写回原客户端，并按 idle timeout 清理映射。
 
@@ -31,7 +28,7 @@
 - Windows 支持设置/清理当前用户系统代理。
 - macOS 支持通过 `networksetup` 设置/清理 HTTP 和 HTTPS 系统代理。
 - Linux 支持通过 GNOME `gsettings` 设置/清理桌面系统代理，并写入 `environment.d` shell 代理环境文件。
-- UI 支持把 HTTP 正向代理服务和常用系统代理配置档合并为来源列表，选中后可从右侧启动并设置对应系统代理；同时支持手动填写临时目标。
+- UI 以代理配置列表为入口，支持添加常用 host/port/bypass，保存后在列表行内启用；HTTP 正向代理服务也可在同一列表中启动并启用。
 - 非 GNOME Linux 环境找不到 `gsettings` 时不会静默伪装成功，状态消息会说明只写入 shell 代理环境文件。
 
 ## App Shell
@@ -41,6 +38,13 @@
 - 托盘左键点击或双击会恢复并聚焦主窗口。
 - 设置页提供“开机启动应用”开关，写入或清理当前系统登录启动项；它只负责启动 net-power 应用本身。
 - “服务自动启动”是应用启动后的服务恢复策略，独立于系统开机启动项。
+
+## Tool Services
+
+- 服务页支持从列表入口添加 HTTP 工具服务，填写名称、监听主机和端口后会写入 SQLite，并可立即启动。
+- 单个 HTTP 工具服务可同时挂载一个静态目录和多条接口路由；接口优先匹配，未命中接口时再按静态目录路径前缀读取文件。
+- 接口路由可配置请求方法、请求路径、状态码、Content-Type 和响应内容；响应内容支持表单内手写或选择本地文件。
+- 工具服务配置保存在 SQLite；暂停只停止当前运行态，不删除配置，退出应用后仍可从列表再次启动。
 
 ## 配置日志
 
