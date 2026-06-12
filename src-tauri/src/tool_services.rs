@@ -4,10 +4,11 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
     RuntimeStatus, ToolServiceContentSource, ToolServiceInput, ToolServiceRouteInput,
-    ToolServiceSummary,
+    ToolServiceStaticMode, ToolServiceSummary,
 };
 use chrono::Utc;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -133,6 +134,7 @@ struct ToolServiceRuntimeConfig {
     host: String,
     port: u16,
     static_root_dir: Option<PathBuf>,
+    static_mode: ToolServiceStaticMode,
     static_path_prefix: String,
     routes: Vec<ToolServiceRouteConfig>,
 }
@@ -201,6 +203,7 @@ impl TryFrom<ToolServiceInput> for ToolServiceRuntimeConfig {
             host: host.to_string(),
             port: input.port,
             static_root_dir,
+            static_mode: input.static_mode,
             static_path_prefix: normalize_service_path(&input.static_path_prefix),
             routes,
         })
@@ -295,7 +298,8 @@ impl RunningToolService {
                 .config
                 .static_root_dir
                 .as_ref()
-                .map(|path| path.to_string_lossy().into_owned()),
+                .map(|path| display_path_for_summary(path)),
+            static_mode: self.config.static_mode,
             static_path_prefix: self.config.static_path_prefix.clone(),
             route_count: self.config.routes.len(),
             started_at: Some(self.started_at.clone()),
@@ -303,6 +307,17 @@ impl RunningToolService {
             runtime_status: RuntimeStatus::Running,
         }
     }
+}
+
+fn display_path_for_summary(path: &Path) -> String {
+    strip_windows_verbatim_prefix(&path.to_string_lossy())
+}
+
+fn strip_windows_verbatim_prefix(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("\\\\?\\UNC\\") {
+        return format!("\\\\{rest}");
+    }
+    path.strip_prefix("\\\\?\\").unwrap_or(path).to_string()
 }
 
 #[derive(Default)]
@@ -374,6 +389,11 @@ struct ToolHttpResponse {
     status: u16,
     content_type: String,
     body: Vec<u8>,
+}
+
+enum StaticResolvedTarget {
+    File(PathBuf),
+    Directory(PathBuf),
 }
 
 async fn read_http_request(stream: &mut TcpStream) -> AppResult<HttpRequest> {
@@ -501,38 +521,59 @@ async fn static_response(
     let Some(root_dir) = &config.static_root_dir else {
         return plain_response(404, "静态目录未配置");
     };
-    let Some(target) =
-        resolve_static_target(root_dir, &config.static_path_prefix, &request.path).await
+    let Some(target) = resolve_static_target(
+        root_dir,
+        &config.static_path_prefix,
+        config.static_mode,
+        &request.path,
+    )
+    .await
     else {
         return plain_response(404, "文件不存在");
     };
-    let content_type = content_type_for_path(&target).to_string();
-    match tokio::fs::read(&target).await {
-        Ok(body) => ToolHttpResponse {
-            status: 200,
-            content_type,
-            body,
-        },
-        Err(_) => plain_response(404, "文件不存在"),
+    match target {
+        StaticResolvedTarget::File(target) => {
+            let content_type = content_type_for_path(&target).to_string();
+            match tokio::fs::read(&target).await {
+                Ok(body) => ToolHttpResponse {
+                    status: 200,
+                    content_type,
+                    body,
+                },
+                Err(_) => plain_response(404, "文件不存在"),
+            }
+        }
+        StaticResolvedTarget::Directory(directory) => {
+            directory_listing_response(config, root_dir, &directory, request).await
+        }
     }
 }
 
 async fn resolve_static_target(
     root_dir: &Path,
     prefix: &str,
+    mode: ToolServiceStaticMode,
     request_path: &str,
-) -> Option<PathBuf> {
+) -> Option<StaticResolvedTarget> {
     let path = request_path_without_query(request_path);
     let relative = relative_request_path(prefix, path)?;
     let mut target = root_dir.to_path_buf();
     if relative.is_empty() {
-        target.push("index.html");
+        if matches!(mode, ToolServiceStaticMode::Site) {
+            target.push("index.html");
+        }
     } else {
         for segment in relative.split('/') {
             if segment.is_empty() {
                 continue;
             }
-            if segment == "." || segment == ".." || segment.contains('\\') {
+            let segment = decode_url_path_segment(segment)?;
+            if segment == "."
+                || segment == ".."
+                || segment.contains('\\')
+                || segment.contains('/')
+                || segment.contains('\0')
+            {
                 return None;
             }
             target.push(segment);
@@ -540,13 +581,275 @@ async fn resolve_static_target(
     }
     let metadata = tokio::fs::metadata(&target).await.ok()?;
     if metadata.is_dir() {
+        if matches!(mode, ToolServiceStaticMode::Directory) {
+            let canonical = tokio::fs::canonicalize(&target).await.ok()?;
+            return canonical
+                .starts_with(root_dir)
+                .then_some(StaticResolvedTarget::Directory(canonical));
+        }
         target.push("index.html");
     }
     let canonical = tokio::fs::canonicalize(&target).await.ok()?;
     if canonical.starts_with(root_dir) {
-        Some(canonical)
+        Some(StaticResolvedTarget::File(canonical))
     } else {
         None
+    }
+}
+
+async fn directory_listing_response(
+    config: &ToolServiceRuntimeConfig,
+    root_dir: &Path,
+    directory: &Path,
+    request: &HttpRequest,
+) -> ToolHttpResponse {
+    match build_directory_listing(config, root_dir, directory, request).await {
+        Ok(body) => ToolHttpResponse {
+            status: 200,
+            content_type: "text/html; charset=utf-8".to_string(),
+            body: body.into_bytes(),
+        },
+        Err(_) => plain_response(404, "目录不可访问"),
+    }
+}
+
+async fn build_directory_listing(
+    config: &ToolServiceRuntimeConfig,
+    root_dir: &Path,
+    directory: &Path,
+    request: &HttpRequest,
+) -> AppResult<String> {
+    let request_path = request_path_without_query(&request.path);
+    let base_path = listing_base_path(request_path);
+    let relative_path = directory
+        .strip_prefix(root_dir)
+        .ok()
+        .map(path_display)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/".to_string());
+    let mut entries = Vec::new();
+    let mut reader = tokio::fs::read_dir(directory).await?;
+    while let Some(entry) = reader.next_entry().await? {
+        let metadata = entry.metadata().await?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = metadata.is_dir();
+        let encoded_name = percent_encode_path_segment(&name);
+        entries.push(DirectoryListingEntry {
+            href: listing_child_href(&base_path, &encoded_name, is_dir),
+            name,
+            is_dir,
+            size: if metadata.is_file() {
+                Some(metadata.len())
+            } else {
+                None
+            },
+        });
+    }
+    entries.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    Ok(render_directory_listing_html(
+        &config.name,
+        request_path,
+        &config.static_path_prefix,
+        &relative_path,
+        entries,
+    ))
+}
+
+struct DirectoryListingEntry {
+    href: String,
+    name: String,
+    is_dir: bool,
+    size: Option<u64>,
+}
+
+fn render_directory_listing_html(
+    service_name: &str,
+    request_path: &str,
+    prefix: &str,
+    relative_path: &str,
+    entries: Vec<DirectoryListingEntry>,
+) -> String {
+    let title = format!("目录列表 - {}", request_path);
+    let mut html = String::new();
+    let _ = write!(
+        html,
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <title>{}</title><style>\
+         :root{{color-scheme:light dark;font-family:Inter,Segoe UI,Arial,sans-serif;}}\
+         body{{margin:0;padding:32px;background:#f6f7f9;color:#15171a;}}\
+         main{{max-width:980px;margin:0 auto;}}\
+         h1{{font-size:24px;margin:0 0 8px;}}\
+         p{{margin:0 0 20px;color:#5c6670;}}\
+         table{{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d9dee5;}}\
+         th,td{{padding:12px 14px;border-bottom:1px solid #edf0f4;text-align:left;}}\
+         th{{font-size:13px;color:#5c6670;background:#f9fafb;}}\
+         a{{color:#0969da;text-decoration:none;}}\
+         a:hover{{text-decoration:underline;}}\
+         .kind{{width:96px;}}.size{{width:120px;text-align:right;}}\
+         @media (prefers-color-scheme:dark){{body{{background:#101214;color:#f2f4f8;}}\
+         p{{color:#a6b0bc;}}table{{background:#161a1f;border-color:#303842;}}\
+         th,td{{border-bottom-color:#242b33;}}th{{background:#1d232b;color:#a6b0bc;}}}}\
+         </style></head><body><main><h1>{}</h1><p>{} · {}</p><table>\
+         <thead><tr><th>名称</th><th class=\"kind\">类型</th><th class=\"size\">大小</th></tr></thead><tbody>",
+        escape_html(&title),
+        escape_html(service_name),
+        escape_html(relative_path),
+        escape_html(request_path),
+    );
+    if let Some(parent) = parent_listing_href(request_path, prefix) {
+        let _ = write!(
+            html,
+            "<tr><td><a href=\"{}\">..</a></td><td class=\"kind\">目录</td><td class=\"size\"></td></tr>",
+            escape_html_attr(&parent)
+        );
+    }
+    if entries.is_empty() {
+        html.push_str("<tr><td colspan=\"3\">目录为空</td></tr>");
+    } else {
+        for entry in entries {
+            let display_name = if entry.is_dir {
+                format!("{}/", entry.name)
+            } else {
+                entry.name.clone()
+            };
+            let download_attr = if entry.is_dir {
+                String::new()
+            } else {
+                format!(" download=\"{}\"", escape_html_attr(&entry.name))
+            };
+            let _ = write!(
+                html,
+                "<tr><td><a href=\"{}\"{}>{}</a></td><td class=\"kind\">{}</td><td class=\"size\">{}</td></tr>",
+                escape_html_attr(&entry.href),
+                download_attr,
+                escape_html(&display_name),
+                if entry.is_dir { "目录" } else { "文件" },
+                entry.size.map(format_file_size).unwrap_or_default(),
+            );
+        }
+    }
+    html.push_str("</tbody></table></main></body></html>");
+    html
+}
+
+fn path_display(path: &Path) -> String {
+    let parts = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", parts.join("/"))
+    }
+}
+
+fn listing_base_path(request_path: &str) -> String {
+    if request_path.ends_with('/') {
+        request_path.to_string()
+    } else {
+        format!("{request_path}/")
+    }
+}
+
+fn listing_child_href(base_path: &str, encoded_name: &str, is_dir: bool) -> String {
+    let mut href = format!("{base_path}{encoded_name}");
+    if is_dir {
+        href.push('/');
+    }
+    href
+}
+
+fn parent_listing_href(request_path: &str, prefix: &str) -> Option<String> {
+    let current = normalize_service_path(request_path);
+    if current == prefix || current == "/" {
+        return None;
+    }
+    let parent = current
+        .rsplit_once('/')
+        .map(|(head, _)| if head.is_empty() { "/" } else { head })
+        .unwrap_or("/");
+    let bounded_parent = if path_matches(prefix, parent) {
+        parent
+    } else {
+        prefix
+    };
+    Some(listing_base_path(bounded_parent))
+}
+
+fn percent_encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(*byte));
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
+fn decode_url_path_segment(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return None;
+            }
+            let high = hex_value(bytes[index + 1])?;
+            let low = hex_value(bytes[index + 2])?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn escape_html_attr(value: &str) -> String {
+    escape_html(value)
+}
+
+fn format_file_size(size: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = size as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{size} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -689,6 +992,18 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use uuid::Uuid;
 
+    #[test]
+    fn display_summary_path_strips_windows_verbatim_prefix() {
+        assert_eq!(
+            display_path_for_summary(Path::new(r"\\?\C:\dev\site")),
+            r"C:\dev\site"
+        );
+        assert_eq!(
+            display_path_for_summary(Path::new(r"\\?\UNC\server\share")),
+            r"\\server\share"
+        );
+    }
+
     #[tokio::test]
     async fn http_service_returns_inline_route_body() {
         let port = reserve_tcp_port();
@@ -701,6 +1016,7 @@ mod tests {
                     host: "127.0.0.1".to_string(),
                     port,
                     static_root_dir: None,
+                    static_mode: ToolServiceStaticMode::Directory,
                     static_path_prefix: "/".to_string(),
                     routes: vec![ToolServiceRouteInput {
                         method: "GET".to_string(),
@@ -747,6 +1063,7 @@ mod tests {
                     host: "127.0.0.1".to_string(),
                     port,
                     static_root_dir: None,
+                    static_mode: ToolServiceStaticMode::Directory,
                     static_path_prefix: "/".to_string(),
                     routes: vec![ToolServiceRouteInput {
                         method: "POST".to_string(),
@@ -792,6 +1109,7 @@ mod tests {
                     host: "127.0.0.1".to_string(),
                     port,
                     static_root_dir: Some(root.to_string_lossy().into_owned()),
+                    static_mode: ToolServiceStaticMode::Directory,
                     static_path_prefix: "/public".to_string(),
                     routes: vec![],
                 },
@@ -807,6 +1125,84 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200 OK"));
         assert!(response.contains("hello"));
+        assert_eq!(
+            manager.stop(&summary.id).await.expect("应可停止"),
+            RuntimeStatus::Stopped
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn http_service_lists_static_directory_and_download_links() {
+        let port = reserve_tcp_port();
+        let root = std::env::temp_dir().join(format!("net-power-tool-service-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("nested")).expect("应可创建测试目录");
+        std::fs::write(root.join("hello world.txt"), "hello").expect("应可写入测试文件");
+        let mut manager = ToolServiceManager::new();
+        let summary = manager
+            .start(
+                "tool-directory".to_string(),
+                ToolServiceInput {
+                    name: "Files".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    static_root_dir: Some(root.to_string_lossy().into_owned()),
+                    static_mode: ToolServiceStaticMode::Directory,
+                    static_path_prefix: "/files".to_string(),
+                    routes: vec![],
+                },
+            )
+            .await
+            .expect("目录浏览服务应可启动");
+
+        let listing = request(summary.port, "GET /files/ HTTP/1.1\r\nHost: local\r\n\r\n").await;
+        assert!(listing.starts_with("HTTP/1.1 200 OK"));
+        assert!(listing.contains("text/html; charset=utf-8"));
+        assert!(listing.contains("hello world.txt"));
+        assert!(listing.contains("href=\"/files/hello%20world.txt\" download=\"hello world.txt\""));
+        assert!(listing.contains("nested/"));
+
+        let file = request(
+            summary.port,
+            "GET /files/hello%20world.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+        )
+        .await;
+        assert!(file.starts_with("HTTP/1.1 200 OK"));
+        assert!(file.contains("hello"));
+        assert_eq!(
+            manager.stop(&summary.id).await.expect("应可停止"),
+            RuntimeStatus::Stopped
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn http_service_site_mode_serves_index_for_directory() {
+        let port = reserve_tcp_port();
+        let root = std::env::temp_dir().join(format!("net-power-tool-service-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("应可创建测试目录");
+        std::fs::write(root.join("index.html"), "<h1>home</h1>").expect("应可写入首页文件");
+        let mut manager = ToolServiceManager::new();
+        let summary = manager
+            .start(
+                "tool-site".to_string(),
+                ToolServiceInput {
+                    name: "Site".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    static_root_dir: Some(root.to_string_lossy().into_owned()),
+                    static_mode: ToolServiceStaticMode::Site,
+                    static_path_prefix: "/".to_string(),
+                    routes: vec![],
+                },
+            )
+            .await
+            .expect("静态网站服务应可启动");
+
+        let response = request(summary.port, "GET / HTTP/1.1\r\nHost: local\r\n\r\n").await;
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("text/html; charset=utf-8"));
+        assert!(response.contains("<h1>home</h1>"));
         assert_eq!(
             manager.stop(&summary.id).await.expect("应可停止"),
             RuntimeStatus::Stopped

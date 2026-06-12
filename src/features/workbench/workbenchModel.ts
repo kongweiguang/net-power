@@ -14,8 +14,11 @@ import type {
   SshProfile,
   SshProfileInput,
   ToolServiceContentSource,
+  ToolServiceConfig,
   ToolServiceInput,
+  ToolServiceSummary,
   ToolServiceRouteInput,
+  ToolServiceStaticMode,
 } from "../../types";
 
 /** 工具 HTTP 服务支持的方法。 */
@@ -40,6 +43,8 @@ export interface ToolServiceDraft {
   port: string;
   /** 静态目录路径。 */
   staticRootDir: string;
+  /** 静态目录访问模式。 */
+  staticMode: ToolServiceStaticMode;
   /** 静态目录挂载路径前缀。 */
   staticPathPrefix: string;
   /** 接口路由草稿。 */
@@ -171,6 +176,125 @@ export const toolServiceContentSourceLabels: Record<ToolServiceContentSource, st
   file: "选择文件",
 };
 
+/** 工具 HTTP 服务静态目录访问模式展示名。 */
+export const toolServiceStaticModeLabels: Record<ToolServiceStaticMode, string> = {
+  directory: "目录浏览",
+  site: "静态网站",
+};
+
+/** 监听绑定模式。local 只监听本机，lan 监听所有网卡，custom 用于兼容已有自定义主机。 */
+export type BindMode = "local" | "lan" | "custom";
+
+/** 本机监听地址。 */
+export const localBindHost = "127.0.0.1";
+
+/** 局域网监听地址。 */
+export const lanBindHost = "0.0.0.0";
+
+/** 绑定模式展示名。 */
+export const bindModeLabels: Record<Exclude<BindMode, "custom">, string> = {
+  local: "本地 (127.0.0.1)",
+  lan: "局域网 (0.0.0.0)",
+};
+
+/** 根据已保存 host 推断表单绑定模式。 */
+export function bindModeFromHost(host: string): BindMode {
+  const normalized = host.trim().toLowerCase();
+  if (normalized === lanBindHost) return "lan";
+  if (!normalized || normalized === localBindHost || normalized === "localhost") return "local";
+  return "custom";
+}
+
+/** 根据绑定模式返回后端实际监听 host；custom 保留已有值。 */
+export function hostForBindMode(mode: BindMode, currentHost = localBindHost): string {
+  if (mode === "lan") return lanBindHost;
+  if (mode === "local") return localBindHost;
+  return currentHost.trim() || localBindHost;
+}
+
+/** 绑定模式下拉选项。自定义 host 只在编辑旧数据时出现，用于避免无意改写。 */
+export function bindModeOptionsForHost(host: string): Array<{ value: BindMode; label: string }> {
+  const options: Array<{ value: BindMode; label: string }> = [
+    { value: "local", label: bindModeLabels.local },
+    { value: "lan", label: bindModeLabels.lan },
+  ];
+  if (bindModeFromHost(host) === "custom") {
+    options.push({ value: "custom", label: `自定义 (${host.trim()})` });
+  }
+  return options;
+}
+
+/** 复制地址时的单条地址。 */
+export interface AccessAddress {
+  /** 地址类型标签。 */
+  label: "本地" | "局域网" | "自定义";
+  /** 可复制地址。 */
+  value: string;
+}
+
+/** 复制地址动作的剪贴板内容和用户提示。 */
+export interface AddressCopyPayload {
+  /** 写入剪贴板的纯地址。 */
+  text: string;
+  /** 复制成功后展示给用户的说明。 */
+  detail: string;
+}
+
+/** 构造服务可访问地址。局域网监听会同时给出本地地址和实际局域网地址。 */
+export function accessAddressEntries(
+  host: string,
+  port: number,
+  format: "hostPort" | "url" = "hostPort",
+  path = "/",
+  lanIp?: string | null,
+): AccessAddress[] {
+  const mode = bindModeFromHost(host);
+  if (mode === "lan") {
+    const lanHost = normalizeLanCopyHost(lanIp);
+    return [
+      { label: "本地", value: formatAccessAddress(localBindHost, port, format, path) },
+      { label: "局域网", value: formatAccessAddress(lanHost, port, format, path) },
+    ];
+  }
+  if (mode === "custom") {
+    return [{ label: "自定义", value: formatAccessAddress(host.trim(), port, format, path) }];
+  }
+  return [{ label: "本地", value: formatAccessAddress(localBindHost, port, format, path) }];
+}
+
+/** 构造普通代理服务的复制地址载荷。 */
+export function serviceAddressCopyPayload(
+  service: Pick<ServiceSummary, "kind" | "listenHost" | "listenPort">,
+  lanIp?: string | null,
+): AddressCopyPayload {
+  const format = service.kind === "http_reverse" || service.kind === "http_forward" ? "url" : "hostPort";
+  return addressCopyPayload(accessAddressEntries(service.listenHost, service.listenPort, format, "/", lanIp), lanIp);
+}
+
+/** 格式化普通代理服务的纯复制地址文本。 */
+export function formatServiceCopyText(
+  service: Pick<ServiceSummary, "kind" | "listenHost" | "listenPort">,
+  lanIp?: string | null,
+): string {
+  return serviceAddressCopyPayload(service, lanIp).text;
+}
+
+/** 构造工具 HTTP 服务的复制地址载荷。 */
+export function toolServiceAddressCopyPayload(
+  service: Pick<ToolServiceSummary, "host" | "port" | "url">,
+  lanIp?: string | null,
+): AddressCopyPayload {
+  return addressCopyPayload(accessAddressEntries(service.host, service.port, "url", urlPathSuffix(service.url), lanIp), lanIp);
+}
+
+/** 格式化工具 HTTP 服务的纯复制地址文本。 */
+export function formatToolServiceCopyText(
+  service: Pick<ToolServiceSummary, "host" | "port" | "url">,
+  lanIp?: string | null,
+): string {
+  return toolServiceAddressCopyPayload(service, lanIp).text;
+}
+
 /** 默认服务草稿。 */
 export const defaultServiceDraft: ServiceDraft = {
   name: "",
@@ -209,10 +333,11 @@ export const defaultToolServiceRouteDraft: ToolServiceRouteDraft = {
 
 /** 默认本地工具服务草稿。 */
 export const defaultToolServiceDraft: ToolServiceDraft = {
-  name: "本地 HTTP 服务",
+  name: "HTTP",
   host: "127.0.0.1",
   port: "18080",
   staticRootDir: "",
+  staticMode: "directory",
   staticPathPrefix: "/",
   routes: [defaultToolServiceRouteDraft],
 };
@@ -416,8 +541,31 @@ export function parseToolServiceDraft(draft: ToolServiceDraft): ToolServiceInput
     host: draft.host.trim() || "127.0.0.1",
     port,
     staticRootDir: staticRootDir || null,
+    staticMode: draft.staticMode,
     staticPathPrefix: normalizeHttpPath(draft.staticPathPrefix),
     routes,
+  };
+}
+
+/** 把本地工具服务完整配置回填到编辑表单。 */
+export function toolServiceConfigToDraft(config: ToolServiceConfig): ToolServiceDraft {
+  return {
+    name: config.name,
+    host: config.host,
+    port: String(config.port),
+    staticRootDir: config.staticRootDir ?? "",
+    staticMode: config.staticMode,
+    staticPathPrefix: config.staticPathPrefix,
+    routes: config.routes.map((route, index) => ({
+      id: `route-${index + 1}`,
+      method: route.method,
+      path: route.path,
+      responseStatus: String(route.responseStatus),
+      contentType: route.contentType,
+      contentSource: route.contentSource,
+      body: route.body ?? "",
+      filePath: route.filePath ?? "",
+    })),
   };
 }
 
@@ -521,8 +669,8 @@ export function pageForServiceKind(kind: ServiceKind): PageKey {
 export function pageTitle(page: PageKey): string {
   const titles: Record<PageKey, string> = {
     dashboard: "仪表盘",
-    services: "服务",
-    forwarding: "转发",
+    services: "本地服务",
+    forwarding: "网络转发",
     ssh: "SSH",
     system: "系统代理",
     settings: "设置",
@@ -670,6 +818,56 @@ function normalizeHttpPath(value: string): string {
   if (!trimmed || trimmed === "/") return "/";
   const withLeading = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   return withLeading.replace(/\/+$/u, "") || "/";
+}
+
+function formatAccessAddress(host: string, port: number, format: "hostPort" | "url", path: string): string {
+  const hostPort = `${formatAddressHost(host)}:${port}`;
+  if (format === "hostPort") return hostPort;
+  return `http://${hostPort}${normalizeUrlPathSuffix(path)}`;
+}
+
+function normalizeLanCopyHost(lanIp?: string | null): string {
+  return lanIp?.trim() || lanBindHost;
+}
+
+function addressCopyPayload(entries: AccessAddress[], lanIp?: string | null): AddressCopyPayload {
+  const localEntry = entries.find((entry) => entry.label === "本地");
+  const lanEntry = entries.find((entry) => entry.label === "局域网");
+  if (localEntry && lanEntry) {
+    if (lanIp?.trim()) {
+      return {
+        text: lanEntry.value,
+        detail: `已复制局域网地址；本机也可用 ${localEntry.value}`,
+      };
+    }
+    return {
+      text: localEntry.value,
+      detail: `未识别到局域网 IP，已复制本地地址 ${localEntry.value}`,
+    };
+  }
+  const entry = entries[0] ?? { label: "本地" as const, value: "" };
+  return {
+    text: entry.value,
+    detail: `${entry.label}地址：${entry.value}`,
+  };
+}
+
+function formatAddressHost(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+function normalizeUrlPathSuffix(path: string): string {
+  if (!path || path === "/") return "/";
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+function urlPathSuffix(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/";
+  }
 }
 
 function parsePositiveInteger(value: string, label: string): number | string {

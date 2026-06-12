@@ -313,18 +313,27 @@ fn insert_tool_service_tx(
 ) -> AppResult<()> {
     tx.execute(
         "INSERT INTO tool_services (
-           id, name, host, port, static_root_dir, static_path_prefix
+           id, name, host, port, static_root_dir, static_mode, static_path_prefix
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             id,
             input.name.trim(),
             input.host.trim(),
             i64::from(input.port),
             normalized_optional(input.static_root_dir.as_deref()),
+            input.static_mode.as_str(),
             normalize_db_http_path(&input.static_path_prefix),
         ],
     )?;
+    insert_tool_service_routes_tx(tx, id, input)
+}
+
+fn insert_tool_service_routes_tx(
+    tx: &Transaction<'_>,
+    id: &str,
+    input: &ToolServiceInput,
+) -> AppResult<()> {
     for (index, route) in input.routes.iter().enumerate() {
         let method = route.method.trim().to_ascii_uppercase();
         let content_type = route.content_type.trim();

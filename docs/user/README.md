@@ -16,7 +16,7 @@ flowchart TD
   B -->|"远程服务器、内网或跳板机"| F["SSH"]
   B -->|"希望系统自动走代理"| G["系统代理"]
   B -->|"已经启动服务但不知道发生了什么"| H["配置日志"]
-  B -->|"只想快速起本地 HTTP 服务"| I["服务"]
+  B -->|"只想快速起本地 HTTP 服务"| I["本地服务页的服务列表"]
 
   C --> C1["让应用把 HTTP/HTTPS 请求发给 net-power"]
   D --> D1["本地监听一个端口，再转发到固定上游"]
@@ -24,20 +24,20 @@ flowchart TD
   F --> F1["先建 SSH Profile，再建 local/remote/SOCKS5 隧道"]
   G --> G1["把操作系统代理指向一个已保存的代理地址"]
   H --> H1["按服务查看启动、停止、连接、错误和流量详情"]
-  I --> I1["启动可挂载目录和接口响应的 HTTP 服务"]
+  I --> I1["添加服务并启动可挂载目录和接口响应的 HTTP 服务"]
 ```
 
 ## 最常见的使用路线
 
-1. 先创建配置：在转发、SSH 或系统代理页面新增一条配置。
-2. 再启动服务：只有转发和 SSH 隧道这类网络服务需要启动；系统代理是操作系统设置，不等同于服务本身。
+1. 先创建配置：在网络转发、SSH 或系统代理页面新增一条配置。
+2. 再启动服务：只有网络转发和 SSH 隧道这类网络服务需要启动；系统代理是操作系统设置，不等同于服务本身。
 3. 看运行状态：仪表盘和配置列表会展示运行状态、连接数、字节统计和最近错误。
 4. 查日志定位问题：点配置行里的“日志”，按级别、协议、时间和关键词筛选。
 5. 需要系统接管时再启用系统代理：系统代理会影响浏览器或系统网络设置，建议先确认目标服务已经可用。
 
 ## 功能速查
 
-HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 都在“转发”页面维护。
+HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 都在“网络转发”页面维护。
 
 | 你想做的事 | 应该用哪个功能 | 需要先准备什么 |
 | --- | --- | --- |
@@ -48,10 +48,10 @@ HTTP Reverse、HTTP Forward、TCP Forward 和 UDP Forward 都在“转发”页�
 | 把 SSH Server 可访问的服务映射到本机端口 | SSH Local Tunnel | SSH Profile、本地监听地址、远程目标地址 |
 | 让远程服务器监听端口并回连本机服务 | SSH Remote Tunnel | SSH Profile、远程绑定地址、本机目标地址 |
 | 把 SSH 当作动态 SOCKS5 代理 | SSH SOCKS5 | SSH Profile、本地 SOCKS5 监听端口 |
-| 创建本地文件服务或接口响应 | 服务 | 本地端口、可选静态目录、接口路径和响应内容 |
+| 创建本地文件服务或接口响应 | 本地服务 | 启动范围、端口、可选静态目录、静态目录模式、接口路径和响应内容 |
 | 一键切换系统代理 | System Proxy | 要写入系统的 host、port、bypass 列表 |
 | 排查服务为什么失败或变慢 | 配置日志 | 先选择对应服务，再打开日志弹框 |
-| 控制应用是否随系统启动 | 设置 | 区分“开机启动应用”和“服务自动启动” |
+| 控制应用是否随系统启动 | 设置 | 区分“开机启动应用”和“服务自动启动”，并查看版本与 GitHub 地址 |
 
 ## 各功能的数据怎么走
 
@@ -88,23 +88,28 @@ flowchart LR
 
 适合场景：你想让浏览器、curl、npm、开发工具这类客户端通过一个代理出口访问外部 HTTP/HTTPS。HTTPS CONNECT 建立后，net-power 只搬运加密字节，不解密 HTTPS 内容。
 
-### 服务：创建本地 HTTP 文件或接口响应
+### 本地服务：创建本地 HTTP 文件或接口响应
 
 ```mermaid
 flowchart LR
-  Client["浏览器、curl 或前端应用"] --> Tool["net-power 服务页<br/>HTTP 工具服务"]
+  Client["浏览器、curl 或前端应用"] --> Tool["net-power 本地服务页<br/>服务列表"]
   Tool --> Route{"先匹配接口路由"}
   Route -->|"命中"| Response{"响应内容来源"}
   Response -->|"手写内容"| Inline["表单内响应体"]
   Response -->|"选择文件"| File["本地响应文件"]
-  Route -->|"未命中"| Static["静态目录<br/>按路径前缀读取文件"]
+  Route -->|"未命中"| StaticMode{"静态目录模式"}
+  StaticMode -->|"目录浏览"| Listing["目录列表<br/>文件可点击下载"]
+  StaticMode -->|"静态网站"| Index["目录下 index.html"]
+  StaticMode -->|"文件路径"| StaticFile["按路径前缀读取文件"]
   Inline --> Tool
   File --> Tool
-  Static --> Tool
+  Listing --> Tool
+  Index --> Tool
+  StaticFile --> Tool
   Tool --> Client
 ```
 
-适合场景：你只是需要快速起一个本地 HTTP 服务，不想创建完整代理配置。一个服务可以同时预览本地文件夹并提供几个接口；接口响应体可以直接填写，也可以通过文件选择器指向本地文件。配置会保存到 SQLite，暂停后仍留在服务页列表里。
+适合场景：你只是需要快速起一个本地 HTTP 服务，不想创建完整代理配置。一个工具服务可以同时预览本地文件夹并提供几个接口；接口响应体可以直接填写，也可以通过文件选择器指向本地文件。静态目录选择“目录浏览”时会生成文件列表，选择“静态网站”时目录请求会优先返回 `index.html`。配置会保存到 SQLite，暂停后仍留在本地服务页的服务列表里，编辑运行中的服务会按新配置重启。
 
 ### TCP Forward：本机 TCP 端口直连目标 TCP
 
@@ -240,8 +245,9 @@ flowchart LR
 | 概念 | 人话解释 |
 | --- | --- |
 | 服务配置 | 保存下来的规则，例如监听哪个端口、转发到哪里、是否启用 rewrite。 |
-| 工具服务 | 服务页里创建的本地 HTTP 服务，可挂载静态目录和接口响应；配置持久化保存，启动/暂停只影响运行态。 |
+| 工具服务 | 本地服务页服务列表里创建的本地 HTTP 服务，可挂载静态目录和接口响应；配置持久化保存，启动/暂停只影响运行态。 |
 | 运行态 | 当前真的在后台跑的任务。应用重启后运行态会消失，需要按自动启动策略重新恢复。 |
+| 启动范围 | 监听地址的人话选择。本地模式只绑定 `127.0.0.1`，局域网模式绑定 `0.0.0.0` 并允许同网段设备访问。 |
 | 系统代理 | 操作系统级设置，会让浏览器或应用把流量发到指定代理地址；它本身不是代理服务。 |
 | HTTP Forward | net-power 作为通用代理，别人把请求交给它，它再往外发。 |
 | HTTP Reverse | net-power 作为固定入口，收到请求后转到指定上游。 |
@@ -260,7 +266,7 @@ flowchart LR
 
 ## 深入阅读
 
-- 业务能力细节见 [../biz/README.md](../biz/README.md)。
-- 架构调用链见 [../ARCHITECTURE.md](../ARCHITECTURE.md)。
-- SQLite 表职责见 [../DATABASE.md](../DATABASE.md)。
-- Secret、日志脱敏和系统权限见 [../SECURITY.md](../SECURITY.md)。
+- 业务能力细节见 [../business/README.md](../business/README.md)。
+- 架构调用链见 [../engineering/architecture.md](../engineering/architecture.md)。
+- SQLite 表职责见 [../engineering/database.md](../engineering/database.md)。
+- Secret、日志脱敏和系统权限见 [../engineering/security.md](../engineering/security.md)。

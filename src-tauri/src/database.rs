@@ -8,7 +8,8 @@ use crate::models::{
     ServiceDetail, ServiceKind, ServiceSummary, SshAuthType, SshProfile, SshProfileInput,
     SshProfileRuntimeConfig, SshTunnelConfig, SystemProxyProfile, SystemProxyProfileInput,
     SystemProxyTarget, TcpForwardConfig, ToolServiceConfig, ToolServiceContentSource,
-    ToolServiceInput, ToolServiceRouteInput, ToolServiceSummary, UdpForwardConfig,
+    ToolServiceInput, ToolServiceRouteInput, ToolServiceStaticMode, ToolServiceSummary,
+    UdpForwardConfig,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use std::collections::HashSet;
@@ -24,6 +25,8 @@ const MIGRATION_0002: &str = include_str!("../migrations/0002_indexes.sql");
 const MIGRATION_0003: &str = include_str!("../migrations/0003_ssh_jump_profiles.sql");
 /// 本地工具 HTTP 服务持久化迁移 SQL。
 const MIGRATION_0004: &str = include_str!("../migrations/0004_tool_services.sql");
+/// 本地工具 HTTP 服务静态目录访问模式迁移 SQL。
+const MIGRATION_0005: &str = include_str!("../migrations/0005_tool_service_static_mode.sql");
 /// 默认日志保留天数。
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 /// 默认日志最大总行数。

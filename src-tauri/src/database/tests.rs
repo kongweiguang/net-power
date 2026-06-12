@@ -74,6 +74,9 @@ mod tests {
         let db = Database::in_memory().expect("内存数据库应初始化成功");
         let settings = db.list_settings().expect("默认设置应可读取");
         assert!(settings.iter().any(|row| row.key == "app.initialized"));
+        assert!(settings
+            .iter()
+            .any(|row| row.key == "ui.theme_mode" && row.value_json == "\"system\""));
     }
 
     #[test]
@@ -250,6 +253,7 @@ mod tests {
                 host: " 127.0.0.1 ".to_string(),
                 port: 18081,
                 static_root_dir: Some(" C:/site ".to_string()),
+                static_mode: ToolServiceStaticMode::Directory,
                 static_path_prefix: " public/ ".to_string(),
                 routes: vec![ToolServiceRouteInput {
                     method: "get".to_string(),
@@ -265,6 +269,7 @@ mod tests {
 
         assert_eq!(created.name, "本地 HTTP");
         assert_eq!(created.host, "127.0.0.1");
+        assert_eq!(created.static_mode, ToolServiceStaticMode::Directory);
         assert_eq!(created.static_path_prefix, "/public");
         assert_eq!(created.routes[0].method, "GET");
         assert_eq!(created.routes[0].path, "/api/ping");
@@ -275,6 +280,42 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].runtime_status, RuntimeStatus::Stopped);
         assert_eq!(listed[0].url, "http://127.0.0.1:18081/public");
+
+        let updated = db
+            .update_tool_service(
+                &created.id,
+                &ToolServiceInput {
+                    name: "本地文件服务".to_string(),
+                    host: "0.0.0.0".to_string(),
+                    port: 18082,
+                    static_root_dir: None,
+                    static_mode: ToolServiceStaticMode::Site,
+                    static_path_prefix: "/".to_string(),
+                    routes: vec![ToolServiceRouteInput {
+                        method: "post".to_string(),
+                        path: "api/update".to_string(),
+                        response_status: 202,
+                        content_type: "text/plain".to_string(),
+                        content_source: ToolServiceContentSource::Inline,
+                        body: Some("accepted".to_string()),
+                        file_path: None,
+                    }],
+                },
+            )
+            .expect("工具服务配置应可更新");
+        assert_eq!(updated.name, "本地文件服务");
+        assert_eq!(updated.host, "0.0.0.0");
+        assert_eq!(updated.port, 18082);
+        assert_eq!(updated.static_root_dir, None);
+        assert_eq!(updated.static_mode, ToolServiceStaticMode::Site);
+        assert_eq!(updated.routes.len(), 1);
+        assert_eq!(updated.routes[0].method, "POST");
+        assert_eq!(updated.routes[0].path, "/api/update");
+
+        let summary = db
+            .get_tool_service_summary(&created.id)
+            .expect("工具服务摘要应可读取");
+        assert_eq!(summary.url, "http://0.0.0.0:18082/api/update");
 
         db.delete_tool_service(&created.id)
             .expect("工具服务配置应可软删除");

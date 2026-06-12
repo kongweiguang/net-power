@@ -101,6 +101,8 @@ pub fn run() {
             commands::restart_service,
             commands::list_runtime_status,
             commands::create_tool_service,
+            commands::get_tool_service,
+            commands::update_tool_service,
             commands::start_tool_service,
             commands::stop_tool_service,
             commands::delete_tool_service,
@@ -122,6 +124,7 @@ pub fn run() {
             commands::set_system_proxy_target,
             commands::clear_system_proxy,
             commands::get_system_proxy_status,
+            commands::get_lan_ip,
             commands::get_system_info,
         ])
         .run(tauri::generate_context!())

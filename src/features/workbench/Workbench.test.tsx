@@ -16,6 +16,7 @@ import type {
   SshProfile,
   SystemProxyProfile,
   SystemProxyStatus,
+  ToolServiceConfig,
   ToolServiceSummary,
 } from "../../types";
 import { Workbench } from "./Workbench";
@@ -37,7 +38,9 @@ const apiMocks = vi.hoisted(() => ({
   servicesRuntime: vi.fn(),
   servicesTest: vi.fn(),
   toolServicesList: vi.fn(),
+  toolServicesGet: vi.fn(),
   toolServicesCreate: vi.fn(),
+  toolServicesUpdate: vi.fn(),
   toolServicesStart: vi.fn(),
   toolServicesStop: vi.fn(),
   toolServicesDelete: vi.fn(),
@@ -51,6 +54,7 @@ const apiMocks = vi.hoisted(() => ({
   sshTest: vi.fn(),
   logsList: vi.fn(),
   logsClear: vi.fn(),
+  networkGetLanIp: vi.fn(),
   proxySet: vi.fn(),
   proxySetTarget: vi.fn(),
   proxyProfilesList: vi.fn(),
@@ -87,7 +91,9 @@ vi.mock("../../api", () => ({
   },
   toolServicesApi: {
     list: apiMocks.toolServicesList,
+    get: apiMocks.toolServicesGet,
     create: apiMocks.toolServicesCreate,
+    update: apiMocks.toolServicesUpdate,
     start: apiMocks.toolServicesStart,
     stop: apiMocks.toolServicesStop,
     delete: apiMocks.toolServicesDelete,
@@ -109,6 +115,9 @@ vi.mock("../../api", () => ({
   logsApi: {
     list: apiMocks.logsList,
     clear: apiMocks.logsClear,
+  },
+  networkApi: {
+    getLanIp: apiMocks.networkGetLanIp,
   },
   systemProxyApi: {
     listProfiles: apiMocks.proxyProfilesList,
@@ -132,6 +141,9 @@ vi.mock("@tauri-apps/api/event", () => ({
 describe("Workbench", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-theme-mode");
+    document.documentElement.style.colorScheme = "";
     mockApis();
   });
 
@@ -141,12 +153,13 @@ describe("Workbench", () => {
 
     await screen.findByRole("heading", { name: "仪表盘" });
     expect(screen.queryByRole("button", { name: "HTTP" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "转发" }));
+    await user.click(screen.getByRole("button", { name: "网络转发" }));
     await user.click(screen.getByRole("button", { name: "添加配置" }));
 
-    const panel = dialogByHeading("添加 转发 配置");
+    const panel = dialogByHeading("添加 网络转发 配置");
     expect(within(panel).getByRole("combobox", { name: "服务类型" })).toHaveAttribute("data-value", "http_reverse");
     await chooseComboboxOption(user, panel, "服务类型", "TCP 转发");
+    await chooseComboboxOption(user, panel, "启动范围", "局域网 (0.0.0.0)");
     await user.type(within(panel).getByLabelText("服务名称"), "Database TCP");
     await user.click(within(panel).getByRole("button", { name: /创建服务/ }));
 
@@ -155,6 +168,7 @@ describe("Workbench", () => {
       expect.objectContaining({
         name: "Database TCP",
         kind: "tcp_forward",
+        listenHost: "0.0.0.0",
         tcpForward: expect.objectContaining({
           targetHost: "127.0.0.1",
           targetPort: 8080,
@@ -371,9 +385,10 @@ describe("Workbench", () => {
     render(<Workbench />);
 
     await screen.findByRole("heading", { name: "仪表盘" });
-    await user.click(screen.getByRole("button", { name: "服务" }));
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
     await user.click(screen.getByRole("button", { name: "添加服务" }));
-    const panel = dialogByHeading("添加 HTTP 服务");
+    const panel = dialogByHeading("添加服务");
+    expect(within(panel).getByRole("combobox", { name: "服务类型" })).toHaveAttribute("data-value", "tool_http");
     await user.clear(within(panel).getByLabelText("服务名称"));
     await user.type(within(panel).getByLabelText("服务名称"), "Local API");
     await user.clear(within(panel).getByLabelText("端口"));
@@ -386,8 +401,10 @@ describe("Workbench", () => {
     expect(apiMocks.toolServicesCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Local API",
+        host: "127.0.0.1",
         port: 18081,
         staticRootDir: null,
+        staticMode: "directory",
         staticPathPrefix: "/",
         routes: [
           expect.objectContaining({
@@ -399,6 +416,133 @@ describe("Workbench", () => {
         ],
       }),
     );
+  });
+
+  it("loads a persisted HTTP tool service into edit mode and saves config changes", async () => {
+    const user = userEvent.setup();
+    mockApis({
+      toolServices: [
+        toolServiceSummary({
+          id: "tool-edit",
+          name: "Local API",
+          staticRootDir: "C:\\dev\\rust\\net-power\\net-power\\src-tauri",
+          staticPathPrefix: "/",
+          runtimeStatus: { type: "stopped" },
+        }),
+      ],
+    });
+    apiMocks.toolServicesGet.mockResolvedValue(toolServiceConfig({ id: "tool-edit", name: "Local API" }));
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
+    const list = panelByHeading("服务列表");
+    expect(within(list).getByText("Local API")).toBeInTheDocument();
+    expect(within(list).getByText("HTTP")).toBeInTheDocument();
+    expect(within(list).getByText("127.0.0.1:18081")).toBeInTheDocument();
+    expect(within(list).queryByText("访问地址")).not.toBeInTheDocument();
+    expect(within(list).getByText("C:\\dev\\rust\\net-power\\net-power\\src-tauri")).toBeInTheDocument();
+    expect(within(list).getByText("目录浏览 · 挂载 / · 1 接口 · 0 请求")).toBeInTheDocument();
+    await user.click(within(list).getByTitle("编辑配置"));
+
+    const panel = dialogByHeading("编辑服务配置");
+    expect(within(panel).getByLabelText("服务名称")).toHaveValue("Local API");
+    await user.clear(within(panel).getByLabelText("服务名称"));
+    await user.type(within(panel).getByLabelText("服务名称"), "Local API v2");
+    await user.clear(within(panel).getByLabelText("路径 #1"));
+    await user.type(within(panel).getByLabelText("路径 #1"), "/api/v2");
+    await user.click(within(panel).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => expect(apiMocks.toolServicesUpdate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.toolServicesUpdate).toHaveBeenCalledWith(
+      "tool-edit",
+      expect.objectContaining({
+        name: "Local API v2",
+        routes: [expect.objectContaining({ path: "/api/v2" })],
+      }),
+    );
+  });
+
+  it("edits inline HTTP tool service response content from the enlarged editor", async () => {
+    const user = userEvent.setup();
+    const body = "{\n  \"ok\": false,\n  \"name\": \"local\"\n}";
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
+    await user.click(screen.getByRole("button", { name: "添加服务" }));
+    const panel = dialogByHeading("添加服务");
+    const inlineBody = within(panel).getByLabelText("接口 1 响应内容");
+    expect(inlineBody).toHaveClass("response-body-textarea");
+
+    await user.click(within(panel).getByRole("button", { name: "放大编辑接口 1 响应内容" }));
+    const bodyDialog = screen.getByRole("dialog", { name: "编辑响应内容" });
+    fireEvent.change(within(bodyDialog).getByLabelText("放大响应内容"), { target: { value: body } });
+    await user.click(within(bodyDialog).getByRole("button", { name: "完成" }));
+
+    expect(screen.queryByRole("dialog", { name: "编辑响应内容" })).not.toBeInTheDocument();
+    expect(inlineBody).toHaveValue(body);
+    await user.click(within(panel).getByRole("button", { name: "创建并启动" }));
+
+    await waitFor(() => expect(apiMocks.toolServicesCreate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.toolServicesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [
+          expect.objectContaining({
+            body,
+            contentSource: "inline",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("copies the LAN address and confirms success for wildcard HTTP tool services", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockApis({
+      toolServices: [
+        toolServiceSummary({
+          host: "0.0.0.0",
+          url: "http://0.0.0.0:18081/api/ping",
+        }),
+      ],
+    });
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
+    await user.click(await screen.findByTitle("复制地址"));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("http://192.168.1.23:18081/api/ping"),
+    );
+    expect(await screen.findByText("地址已复制")).toBeInTheDocument();
+    expect(screen.getByText("已复制局域网地址；本机也可用 http://127.0.0.1:18081/api/ping")).toBeInTheDocument();
+    expect(apiMocks.networkGetLanIp).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the same icon for copy address actions across service menus", async () => {
+    const user = userEvent.setup();
+    mockApis({
+      services: [serviceSummary({ id: "svc-http", name: "Reverse Proxy" })],
+      toolServices: [toolServiceSummary({ id: "tool-http", name: "Local API" })],
+    });
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
+    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-copy")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "网络转发" }));
+    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-copy")).toBeInTheDocument();
   });
 
   it("toggles persisted local HTTP services without deleting the saved config", async () => {
@@ -413,19 +557,19 @@ describe("Workbench", () => {
     render(<Workbench />);
 
     await screen.findByRole("heading", { name: "仪表盘" });
-    await user.click(screen.getByRole("button", { name: "服务" }));
+    await user.click(screen.getByRole("button", { name: "本地服务" }));
 
-    const runningRow = screen.getByText("Running Tool").closest(".compact-row");
-    const stoppedRow = screen.getByText("Stopped Tool").closest(".compact-row");
+    const list = panelByHeading("服务列表");
+    const [runningRow, stoppedRow] = Array.from(list.querySelectorAll<HTMLElement>(".tool-service-row"));
     if (!runningRow || !stoppedRow) {
       throw new Error("找不到工具服务行");
     }
 
-    await user.click(within(runningRow as HTMLElement).getByTitle("暂停服务"));
+    await user.click(within(runningRow).getByTitle("暂停服务"));
     await waitFor(() => expect(apiMocks.toolServicesStop).toHaveBeenCalledWith("tool-running"));
     expect(apiMocks.toolServicesDelete).not.toHaveBeenCalled();
 
-    await user.click(within(stoppedRow as HTMLElement).getByTitle("启动服务"));
+    await user.click(within(stoppedRow).getByTitle("启动服务"));
     await waitFor(() => expect(apiMocks.toolServicesStart).toHaveBeenCalledWith("tool-stopped"));
   });
 
@@ -544,7 +688,7 @@ describe("Workbench", () => {
     if (!row) {
       throw new Error("找不到 Forward 行");
     }
-    await user.click(within(row as HTMLElement).getByRole("button", { name: /启动并启用/ }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "启动后启用代理" }));
 
     await waitFor(() => expect(apiMocks.servicesStart).toHaveBeenCalledWith("svc-forward"));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-forward"));
@@ -580,7 +724,7 @@ describe("Workbench", () => {
     }
     await user.click(within(row as HTMLElement).getByRole("button", { name: /Forward Alt/ }));
     expect(row).toHaveClass("selected");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "启用" }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "启用代理" }));
 
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-alt"));
   });
@@ -626,7 +770,7 @@ describe("Workbench", () => {
     if (!profileRow) {
       throw new Error("找不到系统代理配置行");
     }
-    await user.click(within(profileRow as HTMLElement).getByRole("button", { name: "启用" }));
+    await user.click(within(profileRow as HTMLElement).getByRole("button", { name: "启用代理" }));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("proxy-profile-1"));
 
     await user.click(await screen.findByTitle("删除配置"));
@@ -647,6 +791,14 @@ describe("Workbench", () => {
     await user.click(screen.getByRole("button", { name: "设置" }));
 
     const panel = panelByHeading("应用设置");
+    expect(within(panel).queryByRole("heading", { name: "运行快照" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("navigation", { name: "设置分类导航" })).not.toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "关于" })).toBeInTheDocument();
+    expect(within(panel).getByText("0.1.0")).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: "github.com/kongweiguang/net-power" })).toHaveAttribute(
+      "href",
+      "https://github.com/kongweiguang/net-power",
+    );
     const row = within(panel).getByText("开机启动应用").closest(".setting-row");
     if (!row) {
       throw new Error("找不到开机启动设置行");
@@ -657,6 +809,49 @@ describe("Workbench", () => {
     await waitFor(() =>
       expect(within(row as HTMLElement).getByText("已注册系统登录启动项。")).toBeInTheDocument(),
     );
+  });
+
+  it("switches the persisted theme mode from the settings page", async () => {
+    const user = userEvent.setup();
+
+    render(<Workbench />);
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "设置" }));
+
+    const panel = panelByHeading("应用设置");
+    const themeRow = within(panel).getByText("主题模式").closest(".setting-row");
+    if (!themeRow) {
+      throw new Error("找不到主题模式设置行");
+    }
+    expect(within(themeRow as HTMLElement).getByRole("combobox", { name: "主题模式" })).toHaveAttribute(
+      "data-value",
+      "system",
+    );
+
+    await chooseComboboxOption(user, panel, "主题模式", "深色");
+
+    await waitFor(() => expect(apiMocks.settingsUpdate).toHaveBeenCalledWith("ui.theme_mode", "\"dark\""));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "dark"));
+    expect(document.documentElement).toHaveAttribute("data-theme-mode", "dark");
+    expect(within(themeRow as HTMLElement).getByRole("combobox", { name: "主题模式" })).toHaveAttribute(
+      "data-value",
+      "dark",
+    );
+  });
+
+  it("applies a saved dark theme before the settings page is opened", async () => {
+    mockApis({
+      settings: [
+        ...defaultSettings(),
+        { key: "ui.theme_mode", valueJson: "\"dark\"" },
+      ],
+    });
+
+    render(<Workbench />);
+    await screen.findByRole("heading", { name: "仪表盘" });
+
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "dark"));
+    expect(document.documentElement).toHaveAttribute("data-theme-mode", "dark");
   });
 
   it("checks and installs updates from the settings page", async () => {
@@ -719,7 +914,9 @@ function mockApis({
   apiMocks.servicesRuntime.mockResolvedValue(runtime);
   apiMocks.servicesTest.mockResolvedValue({ ok: true, message: "ok", durationMs: 1 });
   apiMocks.toolServicesList.mockResolvedValue(toolServices);
+  apiMocks.toolServicesGet.mockResolvedValue(toolServiceConfig());
   apiMocks.toolServicesCreate.mockResolvedValue(toolServiceSummary());
+  apiMocks.toolServicesUpdate.mockResolvedValue(toolServiceSummary());
   apiMocks.toolServicesStart.mockResolvedValue(toolServiceSummary());
   apiMocks.toolServicesStop.mockResolvedValue({ type: "stopped" });
   apiMocks.toolServicesDelete.mockResolvedValue(undefined);
@@ -733,6 +930,7 @@ function mockApis({
   apiMocks.sshTest.mockResolvedValue({ ok: true, message: "ok", durationMs: 1 });
   apiMocks.logsList.mockResolvedValue(logs);
   apiMocks.logsClear.mockResolvedValue(undefined);
+  apiMocks.networkGetLanIp.mockResolvedValue("192.168.1.23");
   apiMocks.proxyProfilesList.mockResolvedValue(proxyProfiles);
   apiMocks.proxyProfileCreate.mockResolvedValue(systemProxyProfile());
   apiMocks.proxyProfileUpdate.mockResolvedValue(systemProxyProfile());
@@ -860,11 +1058,38 @@ function toolServiceSummary(overrides: Partial<ToolServiceSummary> = {}): ToolSe
     port: 18081,
     url: "http://127.0.0.1:18081/api/ping",
     staticRootDir: null,
+    staticMode: "directory",
     staticPathPrefix: "/",
     routeCount: 1,
     startedAt: "2026-01-01T00:00:00Z",
     totalRequests: 0,
     runtimeStatus: { type: "running" },
+    ...overrides,
+  };
+}
+
+function toolServiceConfig(overrides: Partial<ToolServiceConfig> = {}): ToolServiceConfig {
+  return {
+    id: "tool-1",
+    name: "Local API",
+    host: "127.0.0.1",
+    port: 18081,
+    staticRootDir: null,
+    staticMode: "directory",
+    staticPathPrefix: "/",
+    routes: [
+      {
+        method: "GET",
+        path: "/api/ping",
+        responseStatus: 200,
+        contentType: "application/json; charset=utf-8",
+        contentSource: "inline",
+        body: "{\n  \"ok\": true\n}",
+        filePath: null,
+      },
+    ],
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }

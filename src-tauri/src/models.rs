@@ -111,6 +111,39 @@ impl TryFrom<&str> for ToolServiceContentSource {
     }
 }
 
+/// 工具 HTTP 服务静态目录访问模式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolServiceStaticMode {
+    /// 目录请求生成可点击下载的文件列表。
+    #[default]
+    Directory,
+    /// 目录请求按静态网站处理，优先读取 index.html。
+    Site,
+}
+
+impl ToolServiceStaticMode {
+    /// 返回数据库中持久化使用的 snake_case 值。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Directory => "directory",
+            Self::Site => "site",
+        }
+    }
+}
+
+impl TryFrom<&str> for ToolServiceStaticMode {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "directory" => Ok(Self::Directory),
+            "site" => Ok(Self::Site),
+            _ => Err(format!("未知工具服务静态访问模式: {value}")),
+        }
+    }
+}
+
 /// 工具 HTTP 服务接口路由输入。创建配置时会写入 SQLite，启动时进入运行态。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +176,9 @@ pub struct ToolServiceInput {
     pub port: u16,
     /// 静态目录路径；为空表示不挂载静态文件。
     pub static_root_dir: Option<String>,
+    /// 静态目录访问模式。
+    #[serde(default)]
+    pub static_mode: ToolServiceStaticMode,
     /// 静态目录挂载路径前缀。
     pub static_path_prefix: String,
     /// 接口路由列表，按数组顺序匹配。
@@ -164,6 +200,8 @@ pub struct ToolServiceConfig {
     pub port: u16,
     /// 静态目录路径；为空表示不挂载静态文件。
     pub static_root_dir: Option<String>,
+    /// 静态目录访问模式。
+    pub static_mode: ToolServiceStaticMode,
     /// 静态目录挂载路径前缀。
     pub static_path_prefix: String,
     /// 接口路由列表，按数组顺序匹配。
@@ -182,6 +220,7 @@ impl ToolServiceConfig {
             host: self.host.clone(),
             port: self.port,
             static_root_dir: self.static_root_dir.clone(),
+            static_mode: self.static_mode,
             static_path_prefix: self.static_path_prefix.clone(),
             routes: self.routes.clone(),
         }
@@ -213,6 +252,8 @@ pub struct ToolServiceSummary {
     pub url: String,
     /// 静态目录路径，未挂载时为空。
     pub static_root_dir: Option<String>,
+    /// 静态目录访问模式。
+    pub static_mode: ToolServiceStaticMode,
     /// 静态目录挂载路径前缀。
     pub static_path_prefix: String,
     /// 已配置接口路由数量。

@@ -70,13 +70,13 @@ npm run verify:tray
 npm run verify:smoke
 ```
 
-当前 Rust 单元测试覆盖 migration 默认设置、应用数据目录默认解析、环境变量覆盖、服务自动启动选择、服务 CRUD、服务更新事务失败回滚、HTTP 工具服务配置持久化 roundtrip、ServiceManager start/stop 生命周期、运行态端口冲突、异常退出失败态、失败后重启、停止后端口释放、ToolServiceManager 统一 HTTP 服务的静态目录、内联接口响应和文件接口响应、HTTP reverse URL、HTTP reverse 真实转发与 request/response header/body 改写、HTTP chunked 请求体解码/rewrite/Content-Length 规范化、HTTP/1.1 keep-alive 单连接双请求顺序复用、HTTP forward 完整 URL 代理、HTTPS CONNECT 隧道字节复制、TCP 双向复制、UDP 多客户端请求/响应映射、UDP 客户端映射复用、UDP idle 清理、header set/remove、JSON/form body rewrite、缺失 Content-Type 的 JSON 探测、form/json 混合规则、数组越界 warning 跳过、rewrite body size limit、secret 加密后 SQLite 不含明文、密码 SSH profile secret 校验、SSH 跳板链 roundtrip/解析顺序/循环引用和删除保护、系统代理配置档 CRUD/target 解析和 active 标记、system proxy 跨平台命令构造和状态解析、Windows 系统代理真实注册表 set/status/clear roundtrip、service/connection 日志合并查询与 protocol/time range 筛选、日志保留天数和最大总行数清理、SSH local/SSH remote/SSH SOCKS 配置 roundtrip、SSH remote 远程绑定冲突域和本地端口探测跳过、SSH remote 自动重连退避上限、SOCKS5 no-auth CONNECT 解析、known_hosts 主机名格式、known_hosts strict 缺失文件/未知主机/mismatch 判定、系统托盘左键/右键事件判定、托盘中文菜单项和菜单事件动作映射、真实 OpenSSH 密码认证和 direct-tcpip bridge、真实 OpenSSH 多级跳板链 direct-tcpip、真实 OpenSSH remote forward、真实 OpenSSH SOCKS5 动态代理、真实 OpenSSH strict known_hosts mismatch 拒绝连接、真实 OpenSSH passphrase 私钥认证。
-当前前端 Vitest 覆盖 Workbench 表单校验、工具服务表单校验和协议转换、结构化规则转换、高级超时字段转换、SSH remote/SOCKS5 协议转换、SSH known_hosts/timeouts/jumpProfileId 转换、密码认证空密码校验、SSH Profile secret 不回填、SSH Profile 跳板选择、SSH 私钥和 known_hosts 文件选择器、服务编辑回填、页面筛选、字节格式化、服务弹框编辑保存、服务页列表弹框创建并启动统一 HTTP 工具服务、工具服务启动/暂停单按钮切换、转发页面统一展示 HTTP/TCP/UDP 并提交真实 kind、SSH 页面创建 remote 服务并区分远程绑定/本地目标、SSH 页面创建 SOCKS5 服务且不要求固定目标、SSH Profile 通过 get API 编辑且不泄露 secret、配置日志 level/protocol/time range/keyword 筛选、流量详情和 meta 展示、System Proxy 配置列表、列表行内启用、系统代理配置管理和设置页开机启动开关。
-设置页应用更新入口已有组件测试覆盖，会 mock updater API 验证点击“检查更新”后展示下载进度和安装完成提示。
-当前 Playwright 视觉冒烟覆盖浏览器预览模式下的仪表盘、转发、SSH、系统代理、设置页面和配置日志弹框，使用桌面、平板和 390px 窄屏 viewport 检查关键中文内容、流量详情面板和页面级横向溢出。
-当前安装器 smoke 覆盖 NSIS 安装包静默安装到临时目录、安装后 exe 启动、隔离数据目录 SQLite 初始化、安装后 exe WebView 桌面宽度与 390px 窄宽度截图、安装后 exe 关闭隐藏到托盘、静默卸载、安装文件清理和 Add/Remove Programs 注册表记录清理。
-当前 WebView smoke 覆盖真实 Tauri release 窗口启动、标题读取、桌面宽度与 390px 窄宽度 resize、非空截图和隔离数据目录 SQLite 初始化。
-当前 Tray smoke 覆盖真实 Tauri release 主窗口标题读取、隔离数据目录 SQLite 初始化、关闭请求、窗口隐藏到托盘和进程保持运行。
+当前测试覆盖按能力归档，避免在本文档重复维护每个测试函数名：
+
+- Rust 覆盖数据库迁移与默认设置补齐、服务配置事务、工具服务创建/编辑、ServiceManager/ToolServiceManager 生命周期、HTTP/TCP/UDP/SSH 代理核心、系统代理后端构造、日志查询和日志保留。
+- 前端 Vitest 覆盖 Workbench 表单校验、协议转换、编辑回填、页面筛选、工具服务编辑、静态目录模式、复制地址、日志筛选、系统代理配置、主题切换、应用更新入口和关于信息。
+- 外部 gated 测试覆盖 Windows 系统代理真实注册表 roundtrip，以及 WSL Docker OpenSSH 的密码登录、私钥口令登录、local/remote/SOCKS5、两级跳板链和 strict known_hosts mismatch。
+- Playwright 视觉冒烟覆盖浏览器预览模式下的仪表盘、本地服务、网络转发、SSH、系统代理、设置页面和配置日志弹框，并在桌面、平板和 390px 窄屏 viewport 检查关键中文内容、流量详情面板和页面级横向溢出。
+- Release/WebView/Tray/Installer smoke 覆盖 release exe 启动、隔离 SQLite 初始化、真实 WebView resize 截图、关闭隐藏到托盘、NSIS 静默安装、安装后启动和静默卸载。
 
 ## 当前缺口
 
@@ -148,11 +148,11 @@ cargo test external_ssh_private_key_passphrase_auth -- --nocapture
 | --- | --- | --- |
 | Rust 单元测试 | JSON path、body rewrite、header rules、secret crypto、配置校验。 | `cargo test` |
 | Rust 集成测试 | SQLite migration、repository transaction、ServiceManager 生命周期。 | `cargo test` + 临时数据库 |
-| 工具服务测试 | 已保存 HTTP 工具服务的静态目录、内联接口、文件接口、端口、目录/文件校验和暂停后配置保留。 | `cargo test` + 本地 loopback socket |
+| 工具服务测试 | 已保存 HTTP 工具服务的创建、编辑、静态目录模式、内联接口、文件接口、端口、目录/文件校验和暂停后配置保留。 | `cargo test` + 本地 loopback socket |
 | 代理集成测试 | HTTP reverse、HTTP keep-alive、HTTP forward、CONNECT、TCP/UDP forwarding。 | 本地 test upstream + tokio 测试 |
 | SSH 集成测试 | SSH auth、known_hosts、direct-tcpip local forward、remote forward、SOCKS5 动态代理。 | Docker/OpenSSH 或人工测试机 |
 | 前端模型测试 | 表单校验、协议转换、编辑回填、页面筛选。 | Vitest |
-| 前端组件测试 | 服务编辑、SSH secret、日志筛选、系统代理配置列表、列表行内启用和配置管理。 | Vitest + Testing Library，mock Tauri API |
+| 前端组件测试 | 服务编辑、SSH secret、日志筛选、系统代理配置列表、列表行内启用、配置管理和设置页主题切换。 | Vitest + Testing Library，mock Tauri API |
 | 前端视觉冒烟 | 中文工作台、服务表格、日志详情和响应式横向溢出。 | Playwright + 浏览器预览 fallback |
 | 安装器 smoke | NSIS 静默安装、安装后启动、SQLite 初始化、安装后 WebView 响应式截图、关闭隐藏到托盘和静默卸载。 | 临时安装目录 + 隔离数据目录 |
 | WebView smoke | 真实 Tauri release 窗口启动、resize、截图非空和 SQLite 初始化。 | Win32 窗口控制 + 隔离数据目录 |
@@ -197,13 +197,17 @@ npm run verify:smoke
 - 托盘右键中文菜单可执行显示窗口、隐藏到托盘和退出 net-power。
 - 设置页开启“开机启动应用”后，重新登录系统会自动启动 net-power。
 - 设置页关闭“开机启动应用”后，系统登录启动项被清理。
+- 设置页选择浅色、深色或跟随系统后，工作台、表格、弹框、表单、toast 和状态组件颜色随主题切换。
 
 服务配置：
 
-- 服务页可从列表打开添加弹框，创建并启动统一 HTTP 工具服务。
-- 服务页启动的 HTTP 工具服务可通过静态目录路径前缀返回文件内容。
-- 服务页启动的 HTTP 工具服务可通过接口路由返回配置的状态码、Content-Type 和手写或文件响应内容。
-- 服务页暂停工具服务后，原端口可再次使用，配置仍留在列表中。
+- 本地服务页可从服务列表打开添加弹框，展示服务类型并创建统一 HTTP 工具服务。
+- 本地服务页可从服务列表编辑已保存 HTTP 工具服务配置，运行中的服务编辑后会按新配置重启。
+- 本地服务页启动的 HTTP 工具服务可通过静态目录路径前缀返回文件内容。
+- 静态目录选择“目录浏览”时，目录请求返回文件列表；选择“静态网站”时，目录请求优先返回 `index.html`。
+- 本地服务页启动的 HTTP 工具服务可通过接口路由返回配置的状态码、Content-Type 和手写或文件响应内容。
+- 本地服务页暂停工具服务后，原端口可再次使用，配置仍留在列表中。
+- 本地或网络转发服务选择局域网启动范围后，复制地址应写入可访问的纯局域网地址；无法识别局域网 IP 时应回退本地地址并提示原因。
 - 新增、编辑、复制、删除服务可保存到 SQLite。
 - 启动服务后状态变为 Running。
 - 停止服务后状态变为 Stopped。

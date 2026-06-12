@@ -59,7 +59,7 @@ React Workbench
   -> SQLite 事件落库 + service://* 事件推送
 ```
 
-服务页的工具服务走独立运行链路：`create_tool_service(input)` 写入 SQLite 的 `tool_services` / `tool_service_routes` 后立即启动，`start_tool_service(id)` 从 SQLite 读取已保存配置再交给 `ToolServiceManager.running`；`src/tool_services.rs` 只持有 TCP listener、取消令牌和请求计数。工具服务配置会持久化，暂停只移除运行态，不进入应用启动后的代理服务自动恢复队列。
+本地服务页的工具服务走独立运行链路：`create_tool_service(input)` 写入 SQLite 的 `tool_services` / `tool_service_routes` 后立即启动，`get_tool_service(id)` 读取完整配置供编辑回填，`update_tool_service(id, input)` 更新持久化配置；如果被编辑的服务正在运行，命令层会先停止旧运行态再按新配置启动。`start_tool_service(id)` 从 SQLite 读取已保存配置再交给 `ToolServiceManager.running`；`src/tool_services.rs` 只持有 TCP listener、取消令牌和请求计数。工具服务配置会持久化，暂停只移除运行态，不进入应用启动后的代理服务自动恢复队列。
 
 ## 服务生命周期
 
@@ -78,13 +78,13 @@ React Workbench
 3. 停止失败时短暂重新加锁写回失败态，失败摘要保留真实服务类型和监听地址。
 4. 停止成功时写事件、推送状态变化。
 
-这个两阶段停止模型同样用于服务页的已保存工具服务，避免长时间停止等待阻塞其他运行态查询或服务操作。
+这个两阶段停止模型同样用于本地服务页的已保存工具服务，避免长时间停止等待阻塞其他运行态查询或服务操作。
 
 ## 运行状态模型
 
 - SQLite 保存配置和历史事件。
 - `ServiceManager.running` 保存当前运行任务、监听地址和计数器。
-- `ToolServiceManager.running` 保存服务页 HTTP 工具服务的当前运行任务、取消令牌和请求计数；配置本身保存在 SQLite。
+- `ToolServiceManager.running` 保存本地服务页 HTTP 工具服务的当前运行任务、取消令牌和请求计数；配置本身保存在 SQLite。
 - 前端通过 `list_services`、`list_runtime_status` 和 `service://status-changed` / `service://log` 刷新 UI。
 
 ## 窗口与响应式
@@ -101,7 +101,7 @@ Tauri 主窗口使用自定义系统标题栏和可调整尺寸，默认以 1440
 - `ssh_remote`：类似 `ssh -R` 的远程端口转发，远端 SSH server 监听绑定地址后回连到本机目标。
 - `ssh_socks`：类似 `ssh -D` 的 SOCKS5 动态代理，支持 no-auth、CONNECT、IPv4/domain/IPv6 目标地址。
 
-服务页还支持持久化的本地工具 HTTP 服务：单个服务可同时挂载静态目录和多条接口路由，路由响应体支持内联内容或本地文件。它们面向本地开发快速文件/接口服务，暂停后保留配置，退出应用后配置仍可再次启动。
+本地服务页还支持持久化的本地工具 HTTP 服务：单个服务可同时挂载静态目录和多条接口路由，路由响应体支持内联内容或本地文件；静态目录模式支持目录浏览和静态网站，分别用于生成文件列表或按目录返回 `index.html`。它们面向本地开发快速文件/接口服务，暂停后保留配置，退出应用后配置仍可再次启动。
 
 SSH Profile 可选择另一个 Profile 作为跳板，多级跳板通过引用链解析为第一跳到最终目标的连接顺序。`ssh2` 不能直接把 channel 作为新 session 的底层 socket，因此运行时用本地 loopback socket pair 桥接上一跳 `direct-tcpip` channel，确保每一跳仍执行 known_hosts 校验和认证。SSH remote forward 外层有自动重连循环，断线后按指数退避重新建立远程监听。
 

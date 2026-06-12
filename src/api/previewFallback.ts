@@ -1,6 +1,6 @@
 /**
  * @author kongweiguang
- * 浏览器预览模式下的只读 Tauri Command fallback。
+ * 浏览器预览模式下的轻量 Tauri Command fallback。
  */
 
 import type {
@@ -32,19 +32,24 @@ interface VisualSmokePreviewData {
   proxyStatus: SystemProxyStatus;
 }
 
-/** 浏览器开发模式下的只读 fallback，避免本地视觉检查被 IPC 错误打断。 */
+const defaultPreviewSettings: AppSetting[] = [
+  { key: "app.initialized", valueJson: "true" },
+  { key: "logs.retention_days", valueJson: "7" },
+  { key: "logs.max_rows", valueJson: "20000" },
+  { key: "services.auto_start_enabled", valueJson: "false" },
+  { key: "ui.theme_mode", valueJson: "\"system\"" },
+];
+
+let previewSettings = [...defaultPreviewSettings];
+
+/** 浏览器开发模式下的 fallback，避免本地视觉检查被 IPC 错误打断。 */
 export function localFallback<T>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
   const preview = visualSmokePreviewData();
   const readonly: Record<string, unknown> = {
-    get_app_settings: [
-      { key: "app.initialized", valueJson: "true" },
-      { key: "logs.retention_days", valueJson: "7" },
-      { key: "logs.max_rows", valueJson: "20000" },
-      { key: "services.auto_start_enabled", valueJson: "false" },
-    ] satisfies AppSetting[],
+    get_app_settings: previewSettings,
     get_autostart_status: {
       enabled: false,
       supported: false,
@@ -56,6 +61,7 @@ export function localFallback<T>(
     list_ssh_profiles: preview?.profiles ?? [],
     list_system_proxy_profiles: preview?.proxyProfiles ?? [],
     list_logs: preview?.logs ?? [],
+    get_lan_ip: "192.168.1.23",
     get_system_proxy_status: preview?.proxyStatus ?? {
       enabled: false,
       proxyHost: "",
@@ -75,6 +81,21 @@ export function localFallback<T>(
     return Promise.resolve(readonly[command] as T);
   }
 
+  if (command === "update_app_setting") {
+    const key = typeof args?.key === "string" ? args.key : "";
+    const valueJson = typeof args?.valueJson === "string" ? args.valueJson : "";
+    if (!key.trim()) {
+      return Promise.reject(new Error("设置 key 不能为空。"));
+    }
+    try {
+      JSON.parse(valueJson);
+    } catch {
+      return Promise.reject(new Error("设置值必须是合法 JSON。"));
+    }
+    previewSettings = upsertPreviewSetting(previewSettings, key, valueJson);
+    return Promise.resolve(undefined as T);
+  }
+
   const id = typeof args?.id === "string" ? args.id : "preview";
   if (command === "test_service" || command === "test_ssh_profile") {
     return Promise.resolve({
@@ -91,6 +112,8 @@ export function localFallback<T>(
   }
   if (
     command === "create_tool_service" ||
+    command === "get_tool_service" ||
+    command === "update_tool_service" ||
     command === "start_tool_service" ||
     command === "stop_tool_service" ||
     command === "delete_tool_service"
@@ -115,6 +138,13 @@ export function localFallback<T>(
   }
 
   return Promise.reject(new Error(`${command} 需要在 Tauri 桌面环境中执行。`));
+}
+
+function upsertPreviewSetting(settings: AppSetting[], key: string, valueJson: string): AppSetting[] {
+  if (settings.some((setting) => setting.key === key)) {
+    return settings.map((setting) => (setting.key === key ? { ...setting, valueJson } : setting));
+  }
+  return [...settings, { key, valueJson }];
 }
 
 /** 显式视觉冒烟预览数据，只在浏览器 URL 带 preview=visual-smoke 时启用。 */
@@ -233,11 +263,12 @@ function visualSmokePreviewData(): VisualSmokePreviewData | null {
     toolServices: [
       {
         id: "preview-tool-http",
-        name: "本地 HTTP 服务预览",
+        name: "HTTP 预览",
         host: "127.0.0.1",
         port: 4173,
         url: "http://127.0.0.1:4173/public",
         staticRootDir: "C:/workspace/site",
+        staticMode: "directory",
         staticPathPrefix: "/public",
         routeCount: 2,
         startedAt: now,

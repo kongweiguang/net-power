@@ -41,7 +41,7 @@ script-src 'self'
 - 当前系统代理能力由 Rust 后端调用平台 API/命令实现，没有向前端暴露 shell 权限。
 - 开机启动能力通过 Rust Command 包装 Tauri autostart 插件，未向前端开放 `plugin:autostart` JS 权限。
 - 应用更新能力仅开放 `updater:default` 和 `process:default`，用于检查/安装更新和安装后重启，不开放 shell 或文件系统权限。
-- 服务页文件夹和响应文件选择仅开放 Tauri dialog open 权限；实际目录和文件读取由 Rust 工具服务在启动时校验，不向前端开放通用 fs 权限。
+- 本地服务页文件夹和响应文件选择仅开放 Tauri dialog open 权限；实际目录和文件读取由 Rust 工具服务在启动时校验，不向前端开放通用 fs 权限。
 
 ## 自动更新安全边界
 
@@ -126,7 +126,7 @@ SSH remote forward 连接日志只记录 `REMOTE`、远程绑定地址、本地�
 
 配置日志弹框的“流量详情”只展示已经落库的连接元数据和完整 meta JSON，不额外读取或保存 request/response body。完整 payload 抓包如果后续加入，必须以显式开关、脱敏策略和容量限制为前提。
 
-服务页的接口响应配置会写入 SQLite 的工具服务配置表，暂停或退出应用后仍可再次启动；这些手写响应体和本地响应文件路径不写入 `service_events` 或 `connection_events` 日志。
+本地服务页的接口响应配置会写入 SQLite 的工具服务配置表，暂停或退出应用后仍可再次启动；这些手写响应体和本地响应文件路径不写入 `service_events` 或 `connection_events` 日志。
 
 ## 系统代理风险
 

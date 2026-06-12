@@ -24,6 +24,9 @@ export type RuntimeStatus =
 /** 工具 HTTP 服务响应内容来源。 */
 export type ToolServiceContentSource = "inline" | "file";
 
+/** 工具 HTTP 服务静态目录访问模式。 */
+export type ToolServiceStaticMode = "directory" | "site";
+
 /** 工具 HTTP 服务接口路由输入。 */
 export interface ToolServiceRouteInput {
   /** HTTP 方法。 */
@@ -52,6 +55,8 @@ export interface ToolServiceInput {
   port: number;
   /** 静态目录路径；为空表示不挂载静态文件。 */
   staticRootDir?: string | null;
+  /** 静态目录访问模式。 */
+  staticMode: ToolServiceStaticMode;
   /** 静态目录挂载路径前缀。 */
   staticPathPrefix: string;
   /** 接口路由列表。 */
@@ -72,6 +77,8 @@ export interface ToolServiceSummary {
   url: string;
   /** 静态目录路径。 */
   staticRootDir?: string | null;
+  /** 静态目录访问模式。 */
+  staticMode: ToolServiceStaticMode;
   /** 静态目录挂载路径前缀。 */
   staticPathPrefix: string;
   /** 接口路由数量。 */
@@ -82,6 +89,16 @@ export interface ToolServiceSummary {
   totalRequests: number;
   /** 运行态。 */
   runtimeStatus: RuntimeStatus;
+}
+
+/** 已持久化的本地工具服务完整配置，用于编辑回填。 */
+export interface ToolServiceConfig extends ToolServiceInput {
+  /** 服务主键。 */
+  id: string;
+  /** 创建时间。 */
+  createdAt: string;
+  /** 更新时间。 */
+  updatedAt: string;
 }
 
 /** HTTP 反向代理配置。 */

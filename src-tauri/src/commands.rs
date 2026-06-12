@@ -8,16 +8,25 @@ use crate::models::{
     AppSetting, AutostartStatus, CreateServiceInput, LogFilter, LogRow, RuntimeStatus,
     ServiceDetail, ServiceKind, ServiceRuntimeSummary, ServiceSummary, SshProfile, SshProfileInput,
     SystemInfo, SystemProxyProfile, SystemProxyProfileInput, SystemProxyStatus, SystemProxyTarget,
-    TestResult, ToolServiceInput, ToolServiceSummary,
+    TestResult, ToolServiceConfig, ToolServiceInput, ToolServiceSummary,
 };
 use crate::proxy;
 use crate::system_proxy;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
+
+const LAN_ROUTE_PROBE_TARGETS: [Ipv4Addr; 5] = [
+    Ipv4Addr::new(8, 8, 8, 8),
+    Ipv4Addr::new(1, 1, 1, 1),
+    Ipv4Addr::new(192, 168, 255, 255),
+    Ipv4Addr::new(10, 255, 255, 255),
+    Ipv4Addr::new(172, 31, 255, 255),
+];
 
 /// 读取全部应用设置。
 #[tauri::command]
@@ -193,6 +202,46 @@ pub async fn create_tool_service(
         .start(config.id.clone(), config.to_input())
         .await
         .map_err(String::from)
+}
+
+/// 读取本地工具 HTTP 服务完整配置，用于前端编辑回填。
+#[tauri::command]
+pub fn get_tool_service(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ToolServiceConfig, String> {
+    state.db.get_tool_service(&id).map_err(String::from)
+}
+
+/// 更新本地工具 HTTP 服务配置；若原服务运行中，会用新配置重启。
+#[tauri::command]
+pub async fn update_tool_service(
+    state: State<'_, AppState>,
+    id: String,
+    input: ToolServiceInput,
+) -> Result<ToolServiceSummary, String> {
+    let stopping = {
+        let mut tool_services = state.tool_services.write().await;
+        tool_services.begin_stop(&id)
+    };
+    let should_restart = stopping.is_some();
+    if let Some(stopping) = stopping {
+        stopping.wait().await.map_err(String::from)?;
+    }
+    let config = state
+        .db
+        .update_tool_service(&id, &input)
+        .map_err(String::from)?;
+    if should_restart {
+        return state
+            .tool_services
+            .write()
+            .await
+            .start(config.id.clone(), config.to_input())
+            .await
+            .map_err(String::from);
+    }
+    state.db.get_tool_service_summary(&id).map_err(String::from)
 }
 
 /// 启动已保存的本地工具 HTTP 服务。
@@ -514,6 +563,12 @@ pub fn get_system_proxy_status() -> Result<SystemProxyStatus, String> {
     system_proxy::get_system_proxy_status().map_err(String::from)
 }
 
+/// 获取当前默认路由对应的局域网 IPv4；无法判断时返回空值，前端会降级为通配地址。
+#[tauri::command]
+pub fn get_lan_ip() -> Result<Option<String>, String> {
+    Ok(resolve_lan_ipv4().map(|ip| ip.to_string()))
+}
+
 /// 获取系统和应用信息。
 #[tauri::command]
 pub fn get_system_info(app: AppHandle) -> Result<SystemInfo, String> {
@@ -526,6 +581,48 @@ pub fn get_system_info(app: AppHandle) -> Result<SystemInfo, String> {
         app_version: app.package_info().version.to_string(),
         data_dir,
     })
+}
+
+fn resolve_lan_ipv4() -> Option<Ipv4Addr> {
+    choose_lan_ipv4(
+        LAN_ROUTE_PROBE_TARGETS.iter().filter_map(|target| {
+            local_ipv4_for_udp_target(SocketAddr::new(IpAddr::V4(*target), 80))
+        }),
+    )
+}
+
+fn local_ipv4_for_udp_target(target: SocketAddr) -> Option<Ipv4Addr> {
+    let socket = StdUdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect(target).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+fn choose_lan_ipv4<I>(candidates: I) -> Option<Ipv4Addr>
+where
+    I: IntoIterator<Item = Ipv4Addr>,
+{
+    let mut fallback = None;
+    for ip in candidates {
+        if !is_usable_lan_ipv4(ip) {
+            continue;
+        }
+        if ip.is_private() {
+            return Some(ip);
+        }
+        fallback.get_or_insert(ip);
+    }
+    fallback
+}
+
+fn is_usable_lan_ipv4(ip: Ipv4Addr) -> bool {
+    !ip.is_unspecified()
+        && !ip.is_loopback()
+        && !ip.is_broadcast()
+        && !ip.is_multicast()
+        && !ip.is_link_local()
 }
 
 async fn run_test<F, Fut>(f: F) -> AppResult<TestResult>
@@ -620,4 +717,32 @@ async fn stop_service_for_command(
         manager.complete_stop(outcome);
     }
     Ok(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choose_lan_ipv4_prefers_private_addresses() {
+        let ip = choose_lan_ipv4([
+            Ipv4Addr::new(203, 0, 113, 9),
+            Ipv4Addr::new(192, 168, 1, 23),
+            Ipv4Addr::new(10, 0, 0, 8),
+        ]);
+
+        assert_eq!(ip, Some(Ipv4Addr::new(192, 168, 1, 23)));
+    }
+
+    #[test]
+    fn choose_lan_ipv4_skips_loopback_unspecified_and_link_local() {
+        let ip = choose_lan_ipv4([
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::new(169, 254, 1, 2),
+            Ipv4Addr::new(10, 10, 0, 2),
+        ]);
+
+        assert_eq!(ip, Some(Ipv4Addr::new(10, 10, 0, 2)));
+    }
 }

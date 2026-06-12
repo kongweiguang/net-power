@@ -20,6 +20,7 @@ import {
   fileDialogApi,
   isTauriRuntime,
   logsApi,
+  networkApi,
   servicesApi,
   settingsApi,
   sshProfilesApi,
@@ -28,6 +29,7 @@ import {
   updaterApi,
 } from "../../api";
 import type {
+  AppSetting,
   AppUpdateProgress,
   LogFilter,
   LogRow,
@@ -38,6 +40,7 @@ import type {
 import {
   defaultServiceDraft,
   defaultSshDraft,
+  bindModeFromHost,
   filterServicesByPage,
   pageForServiceKind,
   pageTitle,
@@ -46,7 +49,10 @@ import {
   parseToolServiceDraft,
   readError,
   serviceDetailToDraft,
+  serviceAddressCopyPayload,
   sshProfileToDraft,
+  toolServiceAddressCopyPayload,
+  toolServiceConfigToDraft,
   type PageKey,
   type ServiceDraft,
   type SshDraft,
@@ -69,13 +75,19 @@ import {
   serviceKindsForPage,
   type SystemProxyProfileDraft,
 } from "./workbenchShared";
+import {
+  themeModeSettingKey,
+  themeModeValueJson,
+  useThemeMode,
+  type ThemeMode,
+} from "./useThemeMode";
 import { useWorkbenchData } from "./useWorkbenchData";
 import { useWorkbenchToasts } from "./useWorkbenchToasts";
 
 const primaryNavItems: Array<{ key: PageKey; label: string; icon: typeof Activity }> = [
   { key: "dashboard", label: "仪表盘", icon: Activity },
-  { key: "services", label: "服务", icon: Server },
-  { key: "forwarding", label: "转发", icon: Network },
+  { key: "services", label: "本地服务", icon: Server },
+  { key: "forwarding", label: "网络转发", icon: Network },
   { key: "ssh", label: "SSH", icon: TerminalSquare },
   { key: "system", label: "系统代理", icon: ShieldCheck },
   { key: "settings", label: "设置", icon: Settings },
@@ -151,7 +163,6 @@ export function Workbench() {
   const { toasts, toast } = useWorkbenchToasts();
   const {
     services,
-    runtime,
     toolServices,
     setToolServices,
     profiles,
@@ -177,6 +188,7 @@ export function Workbench() {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [serviceDialogOpen, setServiceDialogOpen] = useState(false);
   const [toolServiceDialogOpen, setToolServiceDialogOpen] = useState(false);
+  const [editingToolServiceId, setEditingToolServiceId] = useState<string | null>(null);
   const [editingSshProfileId, setEditingSshProfileId] = useState<string | null>(null);
   const [sshProfileDialogOpen, setSshProfileDialogOpen] = useState(false);
   const [editingProxyProfileId, setEditingProxyProfileId] = useState<string | null>(null);
@@ -186,6 +198,7 @@ export function Workbench() {
   const [serviceLogFilter, setServiceLogFilter] = useState<LogFilter>({ limit: 200 });
   const [busy, setBusy] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress | null>(null);
+  const { themeMode } = useThemeMode(settings);
 
   const runningCount = services.filter((service) => service.runtimeStatus.type === "running").length;
   const stoppedCount = services.filter((service) => service.runtimeStatus.type === "stopped").length;
@@ -299,27 +312,30 @@ export function Workbench() {
     }
   }
 
-  async function createToolService(event: FormEvent<HTMLFormElement>) {
+  async function saveToolService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const input = parseToolServiceDraft(toolServiceDraft);
     if (typeof input === "string") {
       toast("error", "工具服务校验失败", input);
       return;
     }
-    setBusy("create-tool-service");
+    setBusy("save-tool-service");
     try {
-      const summary = await toolServicesApi.create(input);
+      const summary = editingToolServiceId
+        ? await toolServicesApi.update(editingToolServiceId, input)
+        : await toolServicesApi.create(input);
       setToolServices(await toolServicesApi.list());
       setToolServiceDraft(newToolServiceDraft());
+      setEditingToolServiceId(null);
       setToolServiceDialogOpen(false);
-      toast("success", "工具服务已创建并启动", summary.url);
+      toast("success", editingToolServiceId ? "工具服务配置已更新" : "工具服务已创建并启动", summary.url);
     } catch (err) {
       try {
         setToolServices(await toolServicesApi.list());
       } catch (listErr) {
         console.warn("刷新工具服务列表失败", listErr);
       }
-      toast("error", "创建或启动工具服务失败", readError(err));
+      toast("error", editingToolServiceId ? "更新工具服务失败" : "创建或启动工具服务失败", readError(err));
     } finally {
       setBusy(null);
     }
@@ -349,6 +365,11 @@ export function Workbench() {
     try {
       await toolServicesApi.delete(id);
       setToolServices(await toolServicesApi.list());
+      if (editingToolServiceId === id) {
+        setEditingToolServiceId(null);
+        setToolServiceDraft(newToolServiceDraft());
+        setToolServiceDialogOpen(false);
+      }
       toast("success", "工具服务配置已删除");
     } catch (err) {
       toast("error", "删除工具服务失败", readError(err));
@@ -357,14 +378,68 @@ export function Workbench() {
     }
   }
 
+  async function resolveLanIpForCopy(host: string): Promise<string | null> {
+    if (bindModeFromHost(host) !== "lan") {
+      return null;
+    }
+    try {
+      return await networkApi.getLanIp();
+    } catch (err) {
+      console.warn("读取局域网 IP 失败", err);
+      return null;
+    }
+  }
+
+  async function writeAddressToClipboard(text: string, detail: string) {
+    if (!navigator.clipboard) {
+      toast("error", "复制失败", "当前环境不支持剪贴板。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("success", "地址已复制", detail);
+    } catch (err) {
+      toast("error", "复制失败", readError(err));
+    }
+  }
+
+  async function copyServiceAddress(service: ServiceSummary) {
+    const lanIp = await resolveLanIpForCopy(service.listenHost);
+    const payload = serviceAddressCopyPayload(service, lanIp);
+    await writeAddressToClipboard(payload.text, payload.detail);
+  }
+
+  async function copyToolServiceAddress(service: ToolServiceSummary) {
+    const lanIp = await resolveLanIpForCopy(service.host);
+    const payload = toolServiceAddressCopyPayload(service, lanIp);
+    await writeAddressToClipboard(payload.text, payload.detail);
+  }
+
   function openToolServiceDialog() {
+    setEditingToolServiceId(null);
     setToolServiceDraft(newToolServiceDraft());
     setToolServiceDialogOpen(true);
   }
 
   function closeToolServiceDialog() {
+    setEditingToolServiceId(null);
     setToolServiceDraft(newToolServiceDraft());
     setToolServiceDialogOpen(false);
+  }
+
+  async function editToolService(id: string) {
+    setBusy(`edit-tool:${id}`);
+    try {
+      const config = await toolServicesApi.get(id);
+      setToolServiceDraft(toolServiceConfigToDraft(config));
+      setEditingToolServiceId(id);
+      setToolServiceDialogOpen(true);
+      toast("info", "已载入服务配置编辑", config.name);
+    } catch (err) {
+      toast("error", "读取工具服务配置失败", readError(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function chooseToolServiceRootDir() {
@@ -517,7 +592,7 @@ export function Workbench() {
         await syncRuntime();
         toast(
           "success",
-          service.runtimeStatus.type === "running" ? status.message : "代理已启动并启用系统代理",
+          service.runtimeStatus.type === "running" ? status.message : "服务已启动，系统代理已启用",
           service.name,
         );
         return;
@@ -631,13 +706,17 @@ export function Workbench() {
     setBusy(`setting:${key}`);
     try {
       await settingsApi.update(key, valueJson);
-      setSettings(await settingsApi.list());
+      setSettings(upsertSetting(await settingsApi.list(), key, valueJson));
       toast("success", "设置已保存", key);
     } catch (err) {
       toast("error", "保存设置失败", readError(err));
     } finally {
       setBusy(null);
     }
+  }
+
+  function updateThemeMode(mode: ThemeMode) {
+    void updateSetting(themeModeSettingKey, themeModeValueJson(mode));
   }
 
   async function updateAutostart(enabled: boolean) {
@@ -735,7 +814,7 @@ export function Workbench() {
           {primaryNavItems.map((item) => {
             const Icon = item.icon;
             return (
-              <div className="nav-group" key={item.key}>
+              <div className={cx("nav-group", item.key === "settings" && "nav-group-bottom")} key={item.key}>
                 <button
                   type="button"
                   className={page === item.key ? "nav-item active" : "nav-item"}
@@ -775,6 +854,7 @@ export function Workbench() {
             proxyStatus={proxyStatus}
             busy={busy}
             onAction={serviceAction}
+            onCopyAddress={copyServiceAddress}
             onEdit={editService}
             onLogs={openServiceLogs}
           />
@@ -787,12 +867,15 @@ export function Workbench() {
             runningCount={runningToolServiceCount}
             busy={busy}
             dialogOpen={toolServiceDialogOpen}
+            editingServiceId={editingToolServiceId}
             onDraftChange={setToolServiceDraft}
             onOpenCreate={openToolServiceDialog}
             onCloseDialog={closeToolServiceDialog}
-            onCreate={createToolService}
+            onCreate={saveToolService}
             onToggle={toggleToolService}
+            onEdit={editToolService}
             onDelete={deleteToolService}
+            onCopyAddress={copyToolServiceAddress}
             onChooseDirectory={chooseToolServiceRootDir}
             onChooseFile={chooseToolServiceResponseFile}
           />
@@ -812,6 +895,7 @@ export function Workbench() {
             onOpenCreate={() => openServiceCreateDialog(page)}
             onCancelEdit={cancelServiceEdit}
             onAction={serviceAction}
+            onCopyAddress={copyServiceAddress}
             onEdit={editService}
             onLogs={openServiceLogs}
           />
@@ -837,6 +921,7 @@ export function Workbench() {
             onCancelServiceEdit={cancelServiceEdit}
             onCancelProfileEdit={closeSshProfileDialog}
             onServiceAction={serviceAction}
+            onServiceCopyAddress={copyServiceAddress}
             onServiceEdit={editService}
             onServiceLogs={openServiceLogs}
             onSshAction={sshAction}
@@ -870,12 +955,13 @@ export function Workbench() {
           <SettingsPage
             settings={settings}
             autostart={autostartStatus}
+            themeMode={themeMode}
             busy={busy}
             updateProgress={updateProgress}
             onUpdate={updateSetting}
             onAutostartChange={updateAutostart}
+            onThemeModeChange={updateThemeMode}
             onCheckUpdate={checkForUpdate}
-            runtime={runtime}
           />
         )}
         <ServiceLogsDialog
@@ -893,4 +979,11 @@ export function Workbench() {
       <ToastStack toasts={toasts} />
     </main>
   );
+}
+
+function upsertSetting(settings: AppSetting[], key: string, valueJson: string): AppSetting[] {
+  if (settings.some((setting) => setting.key === key)) {
+    return settings.map((setting) => (setting.key === key ? { ...setting, valueJson } : setting));
+  }
+  return [...settings, { key, valueJson }];
 }

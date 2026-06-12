@@ -6,21 +6,37 @@
 import { describe, expect, it } from "vitest";
 import type { CreateServiceInput, ServiceDetail, ServiceSummary, SshProfile } from "../../types";
 import {
+  bindModeFromHost,
   defaultServiceDraft,
   defaultSshDraft,
   defaultToolServiceRouteDraft,
   defaultToolServiceDraft,
   filterServicesByPage,
   formatBytes,
+  formatServiceCopyText,
+  formatToolServiceCopyText,
+  hostForBindMode,
   pageForServiceKind,
   parseServiceDraft,
   parseSshDraft,
   parseToolServiceDraft,
   serviceDetailToDraft,
+  serviceAddressCopyPayload,
   sshProfileToDraft,
+  toolServiceAddressCopyPayload,
 } from "./workbenchModel";
 
 describe("workbenchModel", () => {
+  it("maps bind modes to local and LAN listen hosts", () => {
+    expect(bindModeFromHost("127.0.0.1")).toBe("local");
+    expect(bindModeFromHost("localhost")).toBe("local");
+    expect(bindModeFromHost("0.0.0.0")).toBe("lan");
+    expect(bindModeFromHost("192.168.1.10")).toBe("custom");
+    expect(hostForBindMode("local", "0.0.0.0")).toBe("127.0.0.1");
+    expect(hostForBindMode("lan", "127.0.0.1")).toBe("0.0.0.0");
+    expect(hostForBindMode("custom", "192.168.1.10")).toBe("192.168.1.10");
+  });
+
   it("maps http reverse draft into create input with structured rewrite rules", () => {
     const input = expectCreateServiceInput(
       parseServiceDraft({
@@ -236,6 +252,7 @@ describe("workbenchModel", () => {
       name: "Static",
       staticPathPrefix: "/public",
       staticRootDir: "C:/site",
+      staticMode: "directory",
       routes: [],
     });
 
@@ -256,8 +273,10 @@ describe("workbenchModel", () => {
     );
     expect(httpInput).toMatchObject({
       name: "HTTP",
+      host: "127.0.0.1",
       port: 18081,
       staticRootDir: null,
+      staticMode: "directory",
       routes: [
         {
           method: "GET",
@@ -268,6 +287,59 @@ describe("workbenchModel", () => {
           filePath: null,
         },
       ],
+    });
+
+    const lanInput = expectToolServiceInput(
+      parseToolServiceDraft({
+        ...defaultToolServiceDraft,
+        name: "LAN HTTP",
+        host: "0.0.0.0",
+      }),
+    );
+    expect(lanInput.host).toBe("0.0.0.0");
+  });
+
+  it("formats pure copy addresses and keeps LAN distinction in copy tips", () => {
+    expect(
+      formatToolServiceCopyText({
+        host: "0.0.0.0",
+        port: 18081,
+        url: "http://0.0.0.0:18081/api/ping",
+      }, "192.168.1.23"),
+    ).toBe("http://192.168.1.23:18081/api/ping");
+    expect(
+      toolServiceAddressCopyPayload({
+        host: "0.0.0.0",
+        port: 18081,
+        url: "http://0.0.0.0:18081/api/ping",
+      }, "192.168.1.23"),
+    ).toEqual({
+      text: "http://192.168.1.23:18081/api/ping",
+      detail: "已复制局域网地址；本机也可用 http://127.0.0.1:18081/api/ping",
+    });
+    expect(
+      formatServiceCopyText({
+        kind: "http_reverse",
+        listenHost: "0.0.0.0",
+        listenPort: 18080,
+      }, "192.168.1.23"),
+    ).toBe("http://192.168.1.23:18080/");
+    expect(
+      formatServiceCopyText({
+        kind: "tcp_forward",
+        listenHost: "0.0.0.0",
+        listenPort: 15432,
+      }),
+    ).toBe("127.0.0.1:15432");
+    expect(
+      serviceAddressCopyPayload({
+        kind: "tcp_forward",
+        listenHost: "0.0.0.0",
+        listenPort: 15432,
+      }),
+    ).toEqual({
+      text: "127.0.0.1:15432",
+      detail: "未识别到局域网 IP，已复制本地地址 127.0.0.1:15432",
     });
   });
 

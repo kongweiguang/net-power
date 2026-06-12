@@ -46,6 +46,10 @@ impl Database {
             conn.execute_batch(MIGRATION_0004)?;
             conn.pragma_update(None, "user_version", 4)?;
         }
+        if version < 5 {
+            conn.execute_batch(MIGRATION_0005)?;
+            conn.pragma_update(None, "user_version", 5)?;
+        }
         Ok(())
     }
 
@@ -55,29 +59,19 @@ impl Database {
             .map_err(|err| AppError::Message(format!("数据库连接被占用: {err}")))
     }
 
-    /// 写入首次启动默认设置。
+    /// 写入缺失的默认设置，不覆盖用户已有配置。
     pub fn initialize_defaults(&self) -> AppResult<()> {
         let conn = self.conn()?;
-        let initialized: Option<String> = conn
-            .query_row(
-                "SELECT value_json FROM app_settings WHERE key = 'app.initialized'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if initialized.is_some() {
-            return Ok(());
-        }
-
         let defaults = [
             ("app.initialized", "true"),
             ("logs.retention_days", "7"),
             ("logs.max_rows", "20000"),
             ("services.auto_start_enabled", "false"),
+            ("ui.theme_mode", "\"system\""),
         ];
         for (key, value_json) in defaults {
             conn.execute(
-                "INSERT INTO app_settings (key, value_json) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO app_settings (key, value_json) VALUES (?1, ?2)",
                 params![key, value_json],
             )?;
         }
@@ -359,11 +353,55 @@ impl Database {
         self.get_tool_service(&id)
     }
 
+    /// 更新本地工具 HTTP 服务配置。运行态由命令层决定是否重启。
+    pub fn update_tool_service(
+        &self,
+        id: &str,
+        input: &ToolServiceInput,
+    ) -> AppResult<ToolServiceConfig> {
+        validate_tool_service_input(input)?;
+        {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction()?;
+            let changed = tx.execute(
+                "UPDATE tool_services
+                 SET name = ?2,
+                     host = ?3,
+                     port = ?4,
+                     static_root_dir = ?5,
+                     static_mode = ?6,
+                     static_path_prefix = ?7,
+                     updated_at = datetime('now')
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![
+                    id,
+                    input.name.trim(),
+                    input.host.trim(),
+                    i64::from(input.port),
+                    normalized_optional(input.static_root_dir.as_deref()),
+                    input.static_mode.as_str(),
+                    normalize_db_http_path(&input.static_path_prefix),
+                ],
+            )?;
+            if changed == 0 {
+                return Err(AppError::NotFound(format!("工具服务不存在: {id}")));
+            }
+            tx.execute(
+                "DELETE FROM tool_service_routes WHERE service_id = ?1",
+                params![id],
+            )?;
+            insert_tool_service_routes_tx(&tx, id, input)?;
+            tx.commit()?;
+        }
+        self.get_tool_service(id)
+    }
+
     /// 读取本地工具 HTTP 服务配置。
     pub fn get_tool_service(&self, id: &str) -> AppResult<ToolServiceConfig> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, host, port, static_root_dir, static_path_prefix, created_at, updated_at
+            "SELECT id, name, host, port, static_root_dir, static_mode,
+                    static_path_prefix, created_at, updated_at
              FROM tool_services
              WHERE id = ?1 AND deleted_at IS NULL",
         )?;
@@ -378,7 +416,8 @@ impl Database {
     pub fn list_tool_services(&self) -> AppResult<Vec<ToolServiceConfig>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, host, port, static_root_dir, static_path_prefix, created_at, updated_at
+            "SELECT id, name, host, port, static_root_dir, static_mode,
+                    static_path_prefix, created_at, updated_at
              FROM tool_services
              WHERE deleted_at IS NULL
              ORDER BY updated_at DESC, created_at DESC",
@@ -398,6 +437,11 @@ impl Database {
                 .map(tool_service_summary_from_config)
                 .collect()
         })
+    }
+
+    /// 读取单个本地工具 HTTP 服务摘要，默认运行态为已停止。
+    pub fn get_tool_service_summary(&self, id: &str) -> AppResult<ToolServiceSummary> {
+        self.get_tool_service(id).map(tool_service_summary_from_config)
     }
 
     /// 软删除本地工具 HTTP 服务配置，运行中的服务需要先由调用方暂停。

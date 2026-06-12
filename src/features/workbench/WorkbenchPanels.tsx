@@ -3,17 +3,22 @@
  * Workbench 系统代理、日志、设置和通用 UI 组件。
  */
 
-import { useEffect, useRef, useState, type ComponentPropsWithoutRef, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   ChevronDown,
   Download,
+  ExternalLink,
   FileText,
+  Info,
   Loader2,
+  Palette,
   Pencil,
+  Power,
   Plus,
   RefreshCw,
+  Save,
   ShieldCheck,
   Trash2,
   X,
@@ -26,12 +31,12 @@ import type {
   LogFilter,
   LogRow,
   RuntimeStatus,
-  ServiceRuntimeSummary,
   ServiceSummary,
   SystemProxyProfile,
   SystemProxyProfileInput,
   SystemProxyStatus,
 } from "../../types";
+import packageJson from "../../../package.json";
 import { formatBytes, formatTime, kindLabels, serviceName } from "./workbenchModel";
 import {
   cx,
@@ -43,6 +48,15 @@ import {
   type SystemProxySource,
   type Toast,
 } from "./workbenchShared";
+import {
+  themeModeOptions,
+  themeModeSettingKey,
+  type ThemeMode,
+} from "./useThemeMode";
+
+const appVersion = packageJson.version;
+const githubRepositoryUrl = "https://github.com/kongweiguang/net-power";
+const githubRepositoryLabel = "github.com/kongweiguang/net-power";
 
 interface SystemProxyPageProps {
   status: SystemProxyStatus;
@@ -208,7 +222,7 @@ function SystemProxyProfileForm({ draft, busy, editing, onDraftChange, onSubmit,
       <FormInput label="绕过地址" value={draft.bypass} onChange={(event) => onDraftChange({ ...draft, bypass: event.currentTarget.value })} />
       <div className="button-row span-2">
         <button type="submit" className="primary-button" disabled={busy === "save-system-proxy-profile"}>
-          {editing ? <Pencil size={16} /> : <Plus size={16} />}
+          {editing ? <Save size={16} /> : <Plus size={16} />}
           {editing ? "保存配置" : "添加配置"}
         </button>
         <button type="button" className="ghost-button" onClick={onCancelEdit}>取消</button>
@@ -247,13 +261,13 @@ function SystemProxySourceList({
               <strong>{source.name}</strong>
               <small>{source.target} · {source.detail}</small>
             </button>
-            <div className="icon-row">
+            <div className="icon-row source-row-actions">
               {source.enabled && <span className="status-pill running">当前</span>}
               <span className="source-kind">{isService ? "服务" : "配置"}</span>
               {isService && <StatusPill status={source.service.runtimeStatus} />}
               <button type="button" className="primary-button" disabled={useBusy} onClick={() => onUse(source.key)}>
                 {useBusy ? <Loader2 size={16} className="spin" /> : <ShieldCheck size={16} />}
-                {isService && !isRunningService ? "启动并启用" : "启用"}
+                {isService && !isRunningService ? "启动后启用代理" : "启用代理"}
               </button>
               {source.type === "profile" && (
                 <>
@@ -361,57 +375,122 @@ export function ServiceLogsDialog({ service, logs, services, busy, filter, onFil
 interface SettingsPageProps {
   settings: AppSetting[];
   autostart: AutostartStatus;
-  runtime: ServiceRuntimeSummary[];
+  themeMode: ThemeMode;
   busy: string | null;
   updateProgress: AppUpdateProgress | null;
   onUpdate: (key: string, valueJson: string) => void;
   onAutostartChange: (enabled: boolean) => void;
+  onThemeModeChange: (mode: ThemeMode) => void;
   onCheckUpdate: () => void;
 }
 
-export function SettingsPage({ settings, autostart, runtime, busy, updateProgress, onUpdate, onAutostartChange, onCheckUpdate }: SettingsPageProps) {
+export function SettingsPage({
+  settings,
+  autostart,
+  themeMode,
+  busy,
+  updateProgress,
+  onUpdate,
+  onAutostartChange,
+  onThemeModeChange,
+  onCheckUpdate,
+}: SettingsPageProps) {
   const autoStartEnabled = settings.find((setting) => setting.key === "services.auto_start_enabled")?.valueJson === "true";
+  const themeModeDetail: Record<ThemeMode, string> = {
+    light: "固定使用浅色界面。",
+    dark: "固定使用深色界面。",
+    system: "跟随操作系统外观。",
+  };
   return (
-    <div className="two-column">
-      <section className="panel">
-        <PanelTitle title="应用设置" subtitle="区分系统开机启动、应用内服务自动启动和桌面端更新。" />
-        <div className="setting-row">
-          <div><strong>开机启动应用</strong><small>{autostart.enabled ? "登录系统后自动启动 net-power。" : "登录系统后不自动启动 net-power。"}</small><small>{autostart.message}</small></div>
-          <button type="button" className="ghost-button" disabled={busy === "autostart" || !autostart.supported} onClick={() => onAutostartChange(!autostart.enabled)}>
-            {autostart.enabled ? "关闭" : "开启"}
-          </button>
-        </div>
-        <div className="setting-row">
-          <div><strong>服务自动启动</strong><small>启动应用后自动启动已启用且开启自动启动的服务。</small></div>
-          <button type="button" className="ghost-button" disabled={busy === "setting:services.auto_start_enabled"} onClick={() => onUpdate("services.auto_start_enabled", autoStartEnabled ? "false" : "true")}>
-            {autoStartEnabled ? "关闭" : "开启"}
-          </button>
-        </div>
-        <div className="setting-row">
-          <div>
-            <strong>应用更新</strong>
-            <small>{updateProgress?.message ?? "从 GitHub Releases 检查、下载并安装桌面端更新。"}</small>
+    <div className="settings-layout">
+      <section className="panel settings-panel settings-panel-refined">
+        <PanelTitle title="应用设置" subtitle="管理启动策略、桌面端更新和应用信息。" />
+        <div className="settings-content-grid">
+          <div className="settings-category-stack">
+            <SettingsCategory id="settings-appearance" title="外观" icon={<Palette size={16} aria-hidden="true" />}>
+              <SettingRow title="主题模式" detail={themeModeDetail[themeMode]}>
+                <SelectControl
+                  aria-label="主题模式"
+                  className="setting-select"
+                  disabled={busy === `setting:${themeModeSettingKey}`}
+                  value={themeMode}
+                  onChange={(event) => onThemeModeChange(event.currentTarget.value as ThemeMode)}
+                  options={themeModeOptions}
+                />
+              </SettingRow>
+            </SettingsCategory>
+
+            <SettingsCategory id="settings-startup" title="启动" icon={<Power size={16} aria-hidden="true" />}>
+              <SettingRow
+                title="开机启动应用"
+                detail={autostart.enabled ? "登录系统后自动启动 net-power。" : "登录系统后不自动启动 net-power。"}
+                extraDetail={autostart.message}
+              >
+                <button type="button" className="ghost-button" disabled={busy === "autostart" || !autostart.supported} onClick={() => onAutostartChange(!autostart.enabled)}>
+                  {autostart.enabled ? "关闭" : "开启"}
+                </button>
+              </SettingRow>
+              <SettingRow title="服务自动启动" detail="启动应用后自动启动已启用且开启自动启动的服务。">
+                <button type="button" className="ghost-button" disabled={busy === "setting:services.auto_start_enabled"} onClick={() => onUpdate("services.auto_start_enabled", autoStartEnabled ? "false" : "true")}>
+                  {autoStartEnabled ? "关闭" : "开启"}
+                </button>
+              </SettingRow>
+            </SettingsCategory>
+
+            <SettingsCategory id="settings-update" title="更新" icon={<RefreshCw size={16} aria-hidden="true" />}>
+              <SettingRow title="应用更新" detail={updateProgress?.message ?? "从 GitHub Releases 检查、下载并安装桌面端更新。"}>
+                <button type="button" className="ghost-button" disabled={busy === "update"} onClick={onCheckUpdate}>
+                  {busy === "update" ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
+                  检查更新
+                </button>
+              </SettingRow>
+            </SettingsCategory>
+
+            <SettingsCategory id="settings-about" title="关于" icon={<Info size={16} aria-hidden="true" />}>
+              <dl className="about-list">
+                <div>
+                  <dt>版本号</dt>
+                  <dd>{appVersion}</dd>
+                </div>
+                <div>
+                  <dt>GitHub</dt>
+                  <dd>
+                    <a className="settings-link" href={githubRepositoryUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink size={15} />
+                      {githubRepositoryLabel}
+                    </a>
+                  </dd>
+                </div>
+              </dl>
+            </SettingsCategory>
           </div>
-          <button type="button" className="ghost-button" disabled={busy === "update"} onClick={onCheckUpdate}>
-            {busy === "update" ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
-            检查更新
-          </button>
-        </div>
-        <div className="compact-list">
-          {settings.map((setting) => <div className="compact-row" key={setting.key}><strong>{setting.key}</strong><small>{setting.valueJson}</small></div>)}
         </div>
       </section>
-      <section className="panel">
-        <PanelTitle title="运行快照" subtitle="运行服务字节和连接累计。" />
-        <div className="compact-list">
-          {runtime.map((item) => (
-            <div className="compact-row" key={item.serviceId}>
-              <strong>{item.listenAddr || item.serviceId}</strong>
-              <small>{formatBytes(item.bytesIn)} 入站 · {formatBytes(item.bytesOut)} 出站 · {item.totalConnections} 连接</small>
-            </div>
-          ))}
-        </div>
-      </section>
+    </div>
+  );
+}
+
+function SettingsCategory({ id, title, icon, children }: { id: string; title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <section id={id} className="settings-category">
+      <div className="settings-category-heading">
+        <span className="settings-category-icon">{icon}</span>
+        <h3>{title}</h3>
+      </div>
+      <div className="settings-category-content">{children}</div>
+    </section>
+  );
+}
+
+function SettingRow({ title, detail, extraDetail, children }: { title: string; detail: string; extraDetail?: string; children: ReactNode }) {
+  return (
+    <div className="setting-row">
+      <div className="setting-row-main">
+        <strong>{title}</strong>
+        <small>{detail}</small>
+        {extraDetail ? <small>{extraDetail}</small> : null}
+      </div>
+      <div className="setting-row-action">{children}</div>
     </div>
   );
 }
@@ -591,6 +670,8 @@ export function DialogShell({
   size?: "default" | "wide";
   children: ReactNode;
 }) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) {
       return;
@@ -617,10 +698,10 @@ export function DialogShell({
         }
       }}
     >
-      <section className={cx("dialog-panel", size === "wide" && "dialog-panel-wide")} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <section className={cx("dialog-panel", size === "wide" && "dialog-panel-wide")} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dialog-heading">
           <div>
-            <h2 id="dialog-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             <p>{description}</p>
           </div>
           <IconButton title="关闭弹框" busy={false} onClick={onClose}>

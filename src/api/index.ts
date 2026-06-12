@@ -28,6 +28,7 @@ import type {
   SystemProxyTarget,
   TestResult,
   ToolServiceInput,
+  ToolServiceConfig,
   ToolServiceSummary,
 } from "../types";
 
@@ -90,9 +91,14 @@ export const servicesApi = {
 export const toolServicesApi = {
   /** 查询已保存的本地工具服务，并合并运行态。 */
   list: () => call<ToolServiceSummary[]>("list_tool_services"),
+  /** 读取本地工具服务完整配置。 */
+  get: (id: string) => call<ToolServiceConfig>("get_tool_service", { id }),
   /** 创建本地工具服务配置并立即启动。 */
   create: (input: ToolServiceInput) =>
     call<ToolServiceSummary>("create_tool_service", { input }),
+  /** 更新本地工具服务配置；运行中服务会用新配置重启。 */
+  update: (id: string, input: ToolServiceInput) =>
+    call<ToolServiceSummary>("update_tool_service", { id, input }),
   /** 启动已保存的本地工具服务。 */
   start: (id: string) => call<ToolServiceSummary>("start_tool_service", { id }),
   /** 暂停本地工具服务，配置仍保留。 */
@@ -175,6 +181,12 @@ export const systemProxyApi = {
   clear: () => call<SystemProxyStatus>("clear_system_proxy"),
   /** 查询系统代理状态。 */
   getStatus: () => call<SystemProxyStatus>("get_system_proxy_status"),
+};
+
+/** 本机网络信息 API。 */
+export const networkApi = {
+  /** 获取默认路由对应的局域网 IPv4；无法判断时返回 null。 */
+  getLanIp: () => call<string | null>("get_lan_ip"),
 };
 
 /** 应用更新 API。 */

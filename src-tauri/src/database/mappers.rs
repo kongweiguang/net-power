@@ -101,16 +101,26 @@ fn system_proxy_profile_from_row(row: &Row<'_>) -> rusqlite::Result<SystemProxyP
 }
 
 fn tool_service_config_from_row(row: &Row<'_>) -> rusqlite::Result<ToolServiceConfig> {
+    let static_mode_raw: String = row.get(5)?;
+    let static_mode =
+        ToolServiceStaticMode::try_from(static_mode_raw.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                5,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+            )
+        })?;
     Ok(ToolServiceConfig {
         id: row.get(0)?,
         name: row.get(1)?,
         host: row.get(2)?,
         port: i64_to_u16(row.get(3)?),
         static_root_dir: row.get(4)?,
-        static_path_prefix: row.get(5)?,
+        static_mode,
+        static_path_prefix: row.get(6)?,
         routes: Vec::new(),
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -128,6 +138,7 @@ fn tool_service_summary_from_config(config: ToolServiceConfig) -> ToolServiceSum
         port: config.port,
         url,
         static_root_dir: config.static_root_dir,
+        static_mode: config.static_mode,
         static_path_prefix: config.static_path_prefix,
         route_count: config.routes.len(),
         started_at: None,

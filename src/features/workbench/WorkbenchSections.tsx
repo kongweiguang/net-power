@@ -3,7 +3,7 @@
  * Workbench 服务、工具服务和 SSH 页面展示组件。
  */
 
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import {
   CheckCircle2,
   ClipboardList,
@@ -11,21 +11,28 @@ import {
   FileText,
   FolderOpen,
   Loader2,
+  Maximize2,
   Pause,
   Pencil,
   Play,
   Plus,
   RotateCcw,
+  Save,
   Trash2,
 } from "lucide-react";
 import type { ServiceKind, ServiceSummary, SshAuthType, SshProfile, SystemProxyStatus, ToolServiceSummary } from "../../types";
 import {
+  bindModeFromHost,
+  bindModeOptionsForHost,
   defaultBodyRewriteRuleDraft,
   defaultHeaderRuleDraft,
+  hostForBindMode,
   kindLabels,
   pageTitle,
   toolServiceContentSourceLabels,
   toolServiceMethodLabels,
+  toolServiceStaticModeLabels,
+  type BindMode,
   type PageKey,
   type ServiceDraft,
   type SshDraft,
@@ -61,11 +68,12 @@ interface DashboardProps {
   proxyStatus: SystemProxyStatus;
   busy: string | null;
   onAction: (id: string, action: "start" | "stop" | "restart" | "delete" | "duplicate" | "test") => void;
+  onCopyAddress: (service: ServiceSummary) => void;
   onEdit: (id: string) => void;
   onLogs: (service: ServiceSummary) => void;
 }
 
-export function Dashboard({ loading, services, runningCount, stoppedCount, failedCount, proxyStatus, busy, onAction, onEdit, onLogs }: DashboardProps) {
+export function Dashboard({ loading, services, runningCount, stoppedCount, failedCount, proxyStatus, busy, onAction, onCopyAddress, onEdit, onLogs }: DashboardProps) {
   return (
     <div className="view-stack">
       <section className="metric-grid">
@@ -76,7 +84,7 @@ export function Dashboard({ loading, services, runningCount, stoppedCount, faile
       </section>
       <section className="panel">
         <PanelTitle title="服务总览" subtitle="启动、停止、测试和复制所有代理服务。" />
-        {loading ? <LoadingRows /> : <ServiceTable services={services} busy={busy} onAction={onAction} onEdit={onEdit} onLogs={onLogs} />}
+        {loading ? <LoadingRows /> : <ServiceTable services={services} busy={busy} onAction={onAction} onCopyAddress={onCopyAddress} onEdit={onEdit} onLogs={onLogs} />}
       </section>
     </div>
   );
@@ -88,12 +96,15 @@ interface ToolServicesPageProps {
   runningCount: number;
   busy: string | null;
   dialogOpen: boolean;
+  editingServiceId: string | null;
   onDraftChange: (draft: ToolServiceDraft) => void;
   onOpenCreate: () => void;
   onCloseDialog: () => void;
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
   onToggle: (service: ToolServiceSummary) => void;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onCopyAddress: (service: ToolServiceSummary) => void;
   onChooseDirectory: () => void;
   onChooseFile: (routeId: string) => void;
 }
@@ -104,12 +115,15 @@ export function ToolServicesPage({
   runningCount,
   busy,
   dialogOpen,
+  editingServiceId,
   onDraftChange,
   onOpenCreate,
   onCloseDialog,
   onCreate,
   onToggle,
+  onEdit,
   onDelete,
+  onCopyAddress,
   onChooseDirectory,
   onChooseFile,
 }: ToolServicesPageProps) {
@@ -117,24 +131,25 @@ export function ToolServicesPage({
     <div className="view-stack">
       <section className="panel service-list-panel">
         <div className="panel-heading">
-          <PanelTitle title="HTTP 服务列表" subtitle={`已保存 ${services.length} 个 HTTP 服务，当前运行 ${runningCount} 个。`} />
+          <PanelTitle title="服务列表" subtitle={`已保存 ${services.length} 个服务，当前运行 ${runningCount} 个。`} />
           <button type="button" className="primary-button" onClick={onOpenCreate}>
             <Plus size={16} />
             添加服务
           </button>
         </div>
-        <ToolServiceList services={services} busy={busy} onToggle={onToggle} onDelete={onDelete} />
+        <ToolServiceList services={services} busy={busy} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} onCopyAddress={onCopyAddress} />
       </section>
       <DialogShell
         open={dialogOpen}
-        title="添加 HTTP 服务"
-        description="一个服务里可以同时挂载静态目录和多个接口响应；接口内容支持手写或读取本地文件。"
+        title={editingServiceId ? "编辑服务配置" : "添加服务"}
+        description="选择服务类型后配置基础信息；当前支持可挂载静态目录和接口响应的 HTTP。"
         onClose={onCloseDialog}
         size="wide"
       >
         <ToolServiceForm
           draft={draft}
           busy={busy}
+          editing={Boolean(editingServiceId)}
           onDraftChange={onDraftChange}
           onSubmit={onCreate}
           onChooseDirectory={onChooseDirectory}
@@ -148,13 +163,16 @@ export function ToolServicesPage({
 interface ToolServiceFormProps {
   draft: ToolServiceDraft;
   busy: string | null;
+  editing: boolean;
   onDraftChange: (draft: ToolServiceDraft) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onChooseDirectory: () => void;
   onChooseFile: (routeId: string) => void;
 }
 
-function ToolServiceForm({ draft, busy, onDraftChange, onSubmit, onChooseDirectory, onChooseFile }: ToolServiceFormProps) {
+function ToolServiceForm({ draft, busy, editing, onDraftChange, onSubmit, onChooseDirectory, onChooseFile }: ToolServiceFormProps) {
+  const [expandedBodyRouteId, setExpandedBodyRouteId] = useState<string | null>(null);
+
   const updateRoute = (routeId: string, patch: Partial<ToolServiceRouteDraft>) => {
     onDraftChange({
       ...draft,
@@ -169,18 +187,42 @@ function ToolServiceForm({ draft, busy, onDraftChange, onSubmit, onChooseDirecto
     });
   };
   const removeRoute = (routeId: string) => {
+    if (expandedBodyRouteId === routeId) {
+      setExpandedBodyRouteId(null);
+    }
     onDraftChange({ ...draft, routes: draft.routes.filter((route) => route.id !== routeId) });
   };
+  const expandedBodyRoute = draft.routes.find((route) => route.id === expandedBodyRouteId && route.contentSource !== "file") ?? null;
 
   return (
     <form className="form-grid" onSubmit={onSubmit}>
+      <FormSelect
+        label="服务类型"
+        value="tool_http"
+        disabled
+        onChange={() => undefined}
+        options={[{ value: "tool_http", label: "HTTP" }]}
+      />
       <FormInput label="服务名称" value={draft.name} onChange={(event) => onDraftChange({ ...draft, name: event.currentTarget.value })} />
-      <FormInput label="监听主机" value={draft.host} onChange={(event) => onDraftChange({ ...draft, host: event.currentTarget.value })} />
+      <FormSelect
+        label="启动范围"
+        value={bindModeFromHost(draft.host)}
+        onChange={(event) =>
+          onDraftChange({ ...draft, host: hostForBindMode(event.currentTarget.value as BindMode, draft.host) })
+        }
+        options={bindModeOptionsForHost(draft.host)}
+      />
       <FormInput label="端口" inputMode="numeric" value={draft.port} onChange={(event) => onDraftChange({ ...draft, port: event.currentTarget.value })} />
       <FormInput
         label="静态路径前缀"
         value={draft.staticPathPrefix}
         onChange={(event) => onDraftChange({ ...draft, staticPathPrefix: event.currentTarget.value })}
+      />
+      <FormSelect
+        label="静态访问模式"
+        value={draft.staticMode}
+        onChange={(event) => onDraftChange({ ...draft, staticMode: event.currentTarget.value as ToolServiceDraft["staticMode"] })}
+        options={Object.entries(toolServiceStaticModeLabels).map(([value, label]) => ({ value, label }))}
       />
 
       <div className="form-field span-2">
@@ -234,9 +276,13 @@ function ToolServiceForm({ draft, busy, onDraftChange, onSubmit, onChooseDirecto
               <FormSelect
                 label="响应来源"
                 value={route.contentSource}
-                onChange={(event) =>
-                  updateRoute(route.id, { contentSource: event.currentTarget.value as ToolServiceRouteDraft["contentSource"] })
-                }
+                onChange={(event) => {
+                  const contentSource = event.currentTarget.value as ToolServiceRouteDraft["contentSource"];
+                  if (contentSource === "file" && expandedBodyRouteId === route.id) {
+                    setExpandedBodyRouteId(null);
+                  }
+                  updateRoute(route.id, { contentSource });
+                }}
                 options={Object.entries(toolServiceContentSourceLabels).map(([value, label]) => ({ value, label }))}
               />
               <FormInput
@@ -262,10 +308,12 @@ function ToolServiceForm({ draft, busy, onDraftChange, onSubmit, onChooseDirecto
                   </div>
                 </div>
               ) : (
-                <label className="form-field">
-                  <span>响应内容</span>
-                  <textarea value={route.body} onChange={(event) => updateRoute(route.id, { body: event.currentTarget.value })} />
-                </label>
+                <ToolRouteBodyField
+                  index={index}
+                  route={route}
+                  onBodyChange={(body) => updateRoute(route.id, { body })}
+                  onExpand={() => setExpandedBodyRouteId(route.id)}
+                />
               )}
               <button type="button" className="icon-button danger" title="删除接口" onClick={() => removeRoute(route.id)}>
                 <Trash2 size={15} />
@@ -274,14 +322,89 @@ function ToolServiceForm({ draft, busy, onDraftChange, onSubmit, onChooseDirecto
           ))
         )}
       </section>
+      <ToolRouteBodyDialog
+        route={expandedBodyRoute}
+        onBodyChange={(body) => {
+          if (expandedBodyRoute) {
+            updateRoute(expandedBodyRoute.id, { body });
+          }
+        }}
+        onClose={() => setExpandedBodyRouteId(null)}
+      />
 
       <div className="button-row span-2">
-        <button type="submit" className="primary-button" disabled={busy === "create-tool-service"}>
-          {busy === "create-tool-service" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-          创建并启动
+        <button type="submit" className="primary-button" disabled={busy === "save-tool-service"}>
+          {busy === "save-tool-service" ? <Loader2 className="spin" size={16} /> : editing ? <Save size={16} /> : <Plus size={16} />}
+          {editing ? "保存配置" : "创建并启动"}
         </button>
       </div>
     </form>
+  );
+}
+
+function ToolRouteBodyField({
+  route,
+  index,
+  onBodyChange,
+  onExpand,
+}: {
+  route: ToolServiceRouteDraft;
+  index: number;
+  onBodyChange: (body: string) => void;
+  onExpand: () => void;
+}) {
+  const label = `接口 ${index + 1} 响应内容`;
+  return (
+    <div className="form-field response-body-field">
+      <span>响应内容</span>
+      <div className="response-body-control">
+        <textarea
+          className="response-body-textarea"
+          aria-label={label}
+          value={route.body}
+          onChange={(event) => onBodyChange(event.currentTarget.value)}
+        />
+        <button type="button" className="icon-button response-body-expand" title={`放大编辑${label}`} aria-label={`放大编辑${label}`} onClick={onExpand}>
+          <Maximize2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ToolRouteBodyDialog({
+  route,
+  onBodyChange,
+  onClose,
+}: {
+  route: ToolServiceRouteDraft | null;
+  onBodyChange: (body: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <DialogShell
+      open={Boolean(route)}
+      title="编辑响应内容"
+      description={route ? `${route.method} ${route.path} · ${route.contentType}` : "编辑接口响应内容。"}
+      onClose={onClose}
+    >
+      {route && (
+        <div className="response-body-dialog">
+          <textarea
+            className="response-body-large"
+            aria-label="放大响应内容"
+            autoFocus
+            value={route.body}
+            onChange={(event) => onBodyChange(event.currentTarget.value)}
+          />
+          <div className="button-row">
+            <button type="button" className="primary-button" onClick={onClose}>
+              完成
+            </button>
+          </div>
+        </div>
+      )}
+    </DialogShell>
   );
 }
 
@@ -289,37 +412,60 @@ function ToolServiceList({
   services,
   busy,
   onToggle,
+  onEdit,
   onDelete,
+  onCopyAddress,
 }: {
   services: ToolServiceSummary[];
   busy: string | null;
   onToggle: (service: ToolServiceSummary) => void;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onCopyAddress: (service: ToolServiceSummary) => void;
 }) {
   if (services.length === 0) {
-    return <EmptyState title="暂无工具服务" detail="创建后会显示访问地址、请求数和启停入口。" />;
+    return <EmptyState title="暂无服务" detail="创建后会显示类型、监听地址、资源和启停入口。" />;
   }
   return (
     <div className="compact-list">
       {services.map((service) => {
         const running = service.runtimeStatus.type === "running" || service.runtimeStatus.type === "starting";
         const toggleBusy = busy === `${running ? "stop" : "start"}-tool:${service.id}`;
+        const staticLabel = service.staticRootDir ?? "无静态目录";
+        const staticDetail = service.staticRootDir
+          ? `${toolServiceStaticModeLabels[service.staticMode]} · 挂载 ${service.staticPathPrefix} · ${service.routeCount} 接口 · ${service.totalRequests} 请求`
+          : `${service.routeCount} 接口 · ${service.totalRequests} 请求`;
         return (
           <div className="compact-row tool-service-row" key={service.id}>
-            <div>
-              <strong>{service.name}</strong>
-              <small>{service.url}</small>
-              <small>
-                {service.staticRootDir ? `${service.staticPathPrefix} · ${service.staticRootDir}` : "无静态目录"} · {service.routeCount} 接口 · {service.totalRequests} 请求
-              </small>
+            <div className="tool-service-summary">
+              <div className="tool-service-cell tool-service-name">
+                <span className="tool-service-label">名称</span>
+                <strong>{service.name}</strong>
+              </div>
+              <div className="tool-service-cell tool-service-identity">
+                <span className="tool-service-label">服务</span>
+                <strong>HTTP</strong>
+              </div>
+              <div className="tool-service-cell">
+                <span className="tool-service-label">监听</span>
+                <span className="tool-service-value">{service.host}:{service.port}</span>
+              </div>
+              <div className="tool-service-cell">
+                <span className="tool-service-label">资源</span>
+                <span className="tool-service-value" title={staticLabel}>{staticLabel}</span>
+                <small>{staticDetail}</small>
+              </div>
             </div>
-            <div className="icon-row">
+            <div className="icon-row tool-service-actions">
               <StatusPill status={service.runtimeStatus} />
-              <IconButton title="复制地址" busy={false} onClick={() => void navigator.clipboard?.writeText(service.url)}>
+              <IconButton title="复制地址" busy={false} onClick={() => onCopyAddress(service)}>
                 <Copy size={15} />
               </IconButton>
               <IconButton title={running ? "暂停服务" : "启动服务"} busy={toggleBusy} onClick={() => onToggle(service)}>
                 {running ? <Pause size={15} /> : <Play size={15} />}
+              </IconButton>
+              <IconButton title="编辑配置" busy={busy === `edit-tool:${service.id}`} onClick={() => onEdit(service.id)}>
+                <Pencil size={15} />
               </IconButton>
               <IconButton title="删除服务" danger busy={busy === `delete-tool:${service.id}`} onClick={() => onDelete(service.id)}>
                 <Trash2 size={15} />
@@ -345,11 +491,12 @@ interface ServicePageProps {
   onOpenCreate: () => void;
   onCancelEdit: () => void;
   onAction: (id: string, action: "start" | "stop" | "restart" | "delete" | "duplicate" | "test") => void;
+  onCopyAddress: (service: ServiceSummary) => void;
   onEdit: (id: string) => void;
   onLogs: (service: ServiceSummary) => void;
 }
 
-export function ServicePage({ page, services, draft, busy, profiles, editingServiceId, serviceDialogOpen, onDraftChange, onSubmit, onOpenCreate, onCancelEdit, onAction, onEdit, onLogs }: ServicePageProps) {
+export function ServicePage({ page, services, draft, busy, profiles, editingServiceId, serviceDialogOpen, onDraftChange, onSubmit, onOpenCreate, onCancelEdit, onAction, onCopyAddress, onEdit, onLogs }: ServicePageProps) {
   const allowedKinds = serviceKindsForPage(page) ?? ["http_reverse"];
   const currentDraft = normalizeDraftForPage(page, draft);
   return (
@@ -362,7 +509,7 @@ export function ServicePage({ page, services, draft, busy, profiles, editingServ
             添加配置
           </button>
         </div>
-        <ServiceTable services={services} busy={busy} onAction={onAction} onEdit={onEdit} onLogs={onLogs} />
+        <ServiceTable services={services} busy={busy} onAction={onAction} onCopyAddress={onCopyAddress} onEdit={onEdit} onLogs={onLogs} />
       </section>
       <DialogShell
         open={serviceDialogOpen || Boolean(editingServiceId)}
@@ -396,6 +543,7 @@ interface SshPageProps {
   onCancelServiceEdit: () => void;
   onCancelProfileEdit: () => void;
   onServiceAction: (id: string, action: "start" | "stop" | "restart" | "delete" | "duplicate" | "test") => void;
+  onServiceCopyAddress: (service: ServiceSummary) => void;
   onServiceEdit: (id: string) => void;
   onServiceLogs: (service: ServiceSummary) => void;
   onSshAction: (id: string, action: "test" | "delete" | "edit") => void;
@@ -403,7 +551,7 @@ interface SshPageProps {
   onChooseKnownHosts: () => void;
 }
 
-export function SshPage({ services, profiles, serviceDraft, sshDraft, busy, sshProfileDialogOpen, serviceDialogOpen, editingServiceId, editingSshProfileId, onServiceDraftChange, onSshDraftChange, onOpenCreateService, onOpenCreateProfile, onCreateService, onCreateProfile, onCancelServiceEdit, onCancelProfileEdit, onServiceAction, onServiceEdit, onServiceLogs, onSshAction, onChoosePrivateKey, onChooseKnownHosts }: SshPageProps) {
+export function SshPage({ services, profiles, serviceDraft, sshDraft, busy, sshProfileDialogOpen, serviceDialogOpen, editingServiceId, editingSshProfileId, onServiceDraftChange, onSshDraftChange, onOpenCreateService, onOpenCreateProfile, onCreateService, onCreateProfile, onCancelServiceEdit, onCancelProfileEdit, onServiceAction, onServiceCopyAddress, onServiceEdit, onServiceLogs, onSshAction, onChoosePrivateKey, onChooseKnownHosts }: SshPageProps) {
   const sshKinds: ServiceKind[] = ["ssh_local", "ssh_remote", "ssh_socks"];
   const tunnelDraft = sshKinds.includes(serviceDraft.kind) ? serviceDraft : { ...serviceDraft, kind: "ssh_local" as ServiceKind };
   return (
@@ -434,7 +582,7 @@ export function SshPage({ services, profiles, serviceDraft, sshDraft, busy, sshP
             添加 SSH 隧道
           </button>
         </div>
-        <ServiceTable services={services} busy={busy} onAction={onServiceAction} onEdit={onServiceEdit} onLogs={onServiceLogs} />
+        <ServiceTable services={services} busy={busy} onAction={onServiceAction} onCopyAddress={onServiceCopyAddress} onEdit={onServiceEdit} onLogs={onServiceLogs} />
       </section>
       <DialogShell
         open={serviceDialogOpen || Boolean(editingServiceId)}
@@ -464,7 +612,6 @@ function ServiceForm({ draft, allowedKinds, profiles, busy, editing, onDraftChan
   const isSshKind = ["ssh_local", "ssh_remote", "ssh_socks"].includes(draft.kind);
   const isSshRemote = draft.kind === "ssh_remote";
   const showFixedTarget = ["tcp_forward", "udp_forward", "ssh_local", "ssh_remote"].includes(draft.kind);
-  const listenHostLabel = isSshRemote ? "远程绑定主机" : "监听主机";
   const listenPortLabel = isSshRemote ? "远程绑定端口" : "监听端口";
   const targetHostLabel = isSshRemote ? "本地目标主机" : "目标主机";
   const targetPortLabel = isSshRemote ? "本地目标端口" : "目标端口";
@@ -477,7 +624,18 @@ function ServiceForm({ draft, allowedKinds, profiles, busy, editing, onDraftChan
         onChange={(event) => onDraftChange({ ...draft, kind: event.currentTarget.value as ServiceKind })}
         options={allowedKinds.map((kind) => ({ value: kind, label: kindLabels[kind] }))}
       />
-      <FormInput label={listenHostLabel} value={draft.listenHost} onChange={(event) => onDraftChange({ ...draft, listenHost: event.currentTarget.value })} />
+      {isSshRemote ? (
+        <FormInput label="远程绑定主机" value={draft.listenHost} onChange={(event) => onDraftChange({ ...draft, listenHost: event.currentTarget.value })} />
+      ) : (
+        <FormSelect
+          label="启动范围"
+          value={bindModeFromHost(draft.listenHost)}
+          onChange={(event) =>
+            onDraftChange({ ...draft, listenHost: hostForBindMode(event.currentTarget.value as BindMode, draft.listenHost) })
+          }
+          options={bindModeOptionsForHost(draft.listenHost)}
+        />
+      )}
       <FormInput label={listenPortLabel} inputMode="numeric" value={draft.listenPort} onChange={(event) => onDraftChange({ ...draft, listenPort: event.currentTarget.value })} />
 
       {draft.kind === "http_reverse" && (
@@ -548,7 +706,7 @@ function ServiceForm({ draft, allowedKinds, profiles, busy, editing, onDraftChan
       <FormInput fieldClassName="span-2" label="备注" value={draft.notes} onChange={(event) => onDraftChange({ ...draft, notes: event.currentTarget.value })} />
       <div className="button-row span-2">
         <button type="submit" className="primary-button" disabled={busy === "save-service"}>
-          {busy === "save-service" ? <Loader2 className="spin" size={16} /> : editing ? <Pencil size={16} /> : <Plus size={16} />}
+          {busy === "save-service" ? <Loader2 className="spin" size={16} /> : editing ? <Save size={16} /> : <Plus size={16} />}
           {editing ? "保存服务" : "创建服务"}
         </button>
         <button type="button" className="ghost-button" onClick={onCancelEdit}>取消</button>
@@ -782,11 +940,12 @@ interface ServiceTableProps {
   services: ServiceSummary[];
   busy: string | null;
   onAction: (id: string, action: "start" | "stop" | "restart" | "delete" | "duplicate" | "test") => void;
+  onCopyAddress: (service: ServiceSummary) => void;
   onEdit?: (id: string) => void;
   onLogs: (service: ServiceSummary) => void;
 }
 
-function ServiceTable({ services, busy, onAction, onEdit, onLogs }: ServiceTableProps) {
+function ServiceTable({ services, busy, onAction, onCopyAddress, onEdit, onLogs }: ServiceTableProps) {
   if (services.length === 0) {
     return <EmptyState title="暂无服务" detail="点击添加配置后，就可以开始管理代理流量。" />;
   }
@@ -826,9 +985,10 @@ function ServiceTable({ services, busy, onAction, onEdit, onLogs }: ServiceTable
                     </IconButton>
                     <IconButton title="重启" busy={busy === `restart:${service.id}`} onClick={() => onAction(service.id, "restart")}><RotateCcw size={15} /></IconButton>
                     <IconButton title="测试" busy={busy === `test:${service.id}`} onClick={() => onAction(service.id, "test")}><CheckCircle2 size={15} /></IconButton>
+                    <IconButton title="复制地址" busy={false} onClick={() => onCopyAddress(service)}><Copy size={15} /></IconButton>
                     {onEdit && <IconButton title="编辑" busy={busy === `edit:${service.id}`} onClick={() => onEdit(service.id)}><Pencil size={15} /></IconButton>}
                     <IconButton title="日志" busy={busy === `logs:${service.id}`} onClick={() => onLogs(service)}><ClipboardList size={15} /></IconButton>
-                    <IconButton title="复制" busy={busy === `duplicate:${service.id}`} onClick={() => onAction(service.id, "duplicate")}><Copy size={15} /></IconButton>
+                    <IconButton title="复制配置" busy={busy === `duplicate:${service.id}`} onClick={() => onAction(service.id, "duplicate")}><Copy size={15} /></IconButton>
                     <IconButton title="删除" danger busy={busy === `delete:${service.id}`} onClick={() => onAction(service.id, "delete")}><Trash2 size={15} /></IconButton>
                   </div>
                 </td>
@@ -946,7 +1106,7 @@ function SshProfileForm({ profiles, editingProfileId, draft, busy, editing, onDr
       <FormInput label="keepalive 间隔 ms" inputMode="numeric" value={draft.keepaliveIntervalMs} onChange={(event) => onDraftChange({ ...draft, keepaliveIntervalMs: event.currentTarget.value })} />
       <div className="button-row span-2">
         <button type="submit" className="primary-button" disabled={busy === "save-ssh"}>
-          {busy === "save-ssh" ? <Loader2 className="spin" size={16} /> : editing ? <Pencil size={16} /> : <Plus size={16} />}
+          {busy === "save-ssh" ? <Loader2 className="spin" size={16} /> : editing ? <Save size={16} /> : <Plus size={16} />}
           {editing ? "保存 SSH 配置" : "添加 SSH 配置"}
         </button>
         <button type="button" className="ghost-button" onClick={onCancelEdit}>取消</button>
