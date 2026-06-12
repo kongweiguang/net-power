@@ -223,6 +223,7 @@ fn windows_system_proxy_registry_roundtrip_restores_original_values() {
     assert!(!current.enabled);
     assert_eq!(current.proxy_host, "");
     assert_eq!(current.proxy_port, None);
+    assert_eq!(current.bypass, "");
 }
 
 #[cfg(target_os = "windows")]

@@ -380,6 +380,8 @@ mod platform {
                 &target.bypass,
                 "/f",
             ])?;
+        } else {
+            let _ = run_reg(&["delete", REG_PATH, "/v", "ProxyOverride", "/f"]);
         }
         Ok(SystemProxyStatus {
             enabled: true,
@@ -403,6 +405,7 @@ mod platform {
             "/f",
         ])?;
         let _ = run_reg(&["delete", REG_PATH, "/v", "ProxyServer", "/f"]);
+        let _ = run_reg(&["delete", REG_PATH, "/v", "ProxyOverride", "/f"]);
         Ok(SystemProxyStatus {
             enabled: false,
             proxy_host: String::new(),
@@ -414,24 +417,29 @@ mod platform {
 
     pub fn get_system_proxy_status() -> AppResult<SystemProxyStatus> {
         let enabled_raw = query_reg("ProxyEnable").unwrap_or_default();
+        let enabled =
+            enabled_raw.contains("0x1") || enabled_raw.split_whitespace().last() == Some("1");
+        if !enabled {
+            return Ok(SystemProxyStatus {
+                enabled: false,
+                proxy_host: String::new(),
+                proxy_port: None,
+                bypass: String::new(),
+                message: "Windows 系统代理未开启".to_string(),
+            });
+        }
         let server_raw = query_reg("ProxyServer").unwrap_or_default();
         let bypass = query_reg("ProxyOverride")
             .ok()
             .and_then(|raw| parse_reg_value(&raw))
             .unwrap_or_default();
-        let enabled =
-            enabled_raw.contains("0x1") || enabled_raw.split_whitespace().last() == Some("1");
         let (host, port) = parse_proxy_server(&server_raw);
         Ok(SystemProxyStatus {
             enabled,
             proxy_host: host,
             proxy_port: port,
             bypass,
-            message: if enabled {
-                "Windows 系统代理已开启".to_string()
-            } else {
-                "Windows 系统代理未开启".to_string()
-            },
+            message: "Windows 系统代理已开启".to_string(),
         })
     }
 

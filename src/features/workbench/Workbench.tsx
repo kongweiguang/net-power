@@ -84,13 +84,28 @@ import {
 import { useWorkbenchData } from "./useWorkbenchData";
 import { useWorkbenchToasts } from "./useWorkbenchToasts";
 
-const primaryNavItems: Array<{ key: PageKey; label: string; icon: typeof Activity }> = [
-  { key: "dashboard", label: "仪表盘", icon: Activity },
-  { key: "services", label: "本地服务", icon: Server },
-  { key: "forwarding", label: "网络转发", icon: Network },
-  { key: "ssh", label: "SSH", icon: TerminalSquare },
-  { key: "system", label: "系统代理", icon: ShieldCheck },
-  { key: "settings", label: "设置", icon: Settings },
+type PrimaryNavItem = { key: PageKey; label: string; icon: typeof Activity };
+type PrimaryNavSection = { label: string; items: PrimaryNavItem[]; bottom?: boolean };
+
+const primaryNavSections: PrimaryNavSection[] = [
+  {
+    label: "概览",
+    items: [{ key: "dashboard", label: "仪表盘", icon: Activity }],
+  },
+  {
+    label: "代理",
+    items: [
+      { key: "services", label: "本地服务", icon: Server },
+      { key: "forwarding", label: "网络转发", icon: Network },
+      { key: "ssh", label: "SSH", icon: TerminalSquare },
+      { key: "system", label: "系统代理", icon: ShieldCheck },
+    ],
+  },
+  {
+    label: "系统",
+    bottom: true,
+    items: [{ key: "settings", label: "设置", icon: Settings }],
+  },
 ];
 
 type WindowControlAction = "minimize" | "toggle-maximize" | "close";
@@ -811,21 +826,29 @@ export function Workbench() {
           </div>
         </div>
         <nav aria-label="主导航">
-          {primaryNavItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div className={cx("nav-group", item.key === "settings" && "nav-group-bottom")} key={item.key}>
-                <button
-                  type="button"
-                  className={page === item.key ? "nav-item active" : "nav-item"}
-                  onClick={() => setPage(item.key)}
-                >
-                  <Icon size={17} />
-                  {item.label}
-                </button>
+          {primaryNavSections.map((section) => (
+            <div className={cx("nav-section", section.bottom && "nav-section-bottom")} key={section.label}>
+              <span className="nav-section-label">{section.label}</span>
+              <div className="nav-section-list">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={page === item.key ? "nav-item active" : "nav-item"}
+                      onClick={() => setPage(item.key)}
+                    >
+                      <span className="nav-item-icon" aria-hidden="true">
+                        <Icon size={16} />
+                      </span>
+                      <span className="nav-item-label">{item.label}</span>
+                    </button>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </nav>
       </aside>
 

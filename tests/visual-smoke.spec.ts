@@ -37,8 +37,74 @@ test.describe("工作台响应式视觉冒烟", () => {
         await assertNoPageOverflow(page, `${viewport.name}:${item.heading}`);
       }
 
+      if (viewport.name === "desktop") {
+        await page.getByRole("button", { name: "系统代理", exact: true }).click();
+        const systemProxyLayout = await page.evaluate(() => {
+          const workspace = document.querySelector<HTMLElement>(".system-proxy-workspace")?.getBoundingClientRect();
+          const list = document.querySelector<HTMLElement>(".source-menu-list")?.getBoundingClientRect();
+          const detail = document.querySelector<HTMLElement>(".system-proxy-detail")?.getBoundingClientRect();
+          const statusStrip = document.querySelector<HTMLElement>(".system-proxy-status-strip")?.getBoundingClientRect();
+          const statusDot = document.querySelector<HTMLElement>(".system-proxy-status-dot")?.getBoundingClientRect();
+          return {
+            workspaceWidth: workspace?.width ?? 0,
+            listWidth: list?.width ?? 0,
+            detailWidth: detail?.width ?? 0,
+            detailLeft: detail?.left ?? 0,
+            listRight: list?.right ?? 0,
+            statusStripWidth: statusStrip?.width ?? 0,
+            statusDotSize: statusDot?.width ?? 0,
+            statusDetailCount: document.querySelectorAll(".system-proxy-status-details > div").length,
+          };
+        });
+        expect(systemProxyLayout.listWidth, "System proxy source menu should render as a compact menu").toBeGreaterThan(240);
+        expect(systemProxyLayout.detailWidth, "System proxy detail should receive the main action space").toBeGreaterThan(
+          systemProxyLayout.listWidth,
+        );
+        expect(systemProxyLayout.detailLeft, "System proxy detail should sit beside the menu on desktop").toBeGreaterThan(
+          systemProxyLayout.listRight,
+        );
+        expect(systemProxyLayout.statusDotSize, "System proxy status should use a compact status dot").toBeGreaterThan(8);
+        expect(systemProxyLayout.statusDetailCount, "System proxy status should show target and bypass only").toBe(2);
+
+        await page.getByRole("button", { name: "SSH", exact: true }).click();
+        const sshLayout = await page.evaluate(() => {
+          const profile = document.querySelector<HTMLElement>(".ssh-profile-panel")?.getBoundingClientRect();
+          const tunnel = document.querySelector<HTMLElement>(".ssh-tunnel-panel")?.getBoundingClientRect();
+          const tunnelTable = document.querySelector<HTMLElement>(".ssh-tunnel-panel .table-wrap");
+          return {
+            profileWidth: profile?.width ?? 0,
+            tunnelWidth: tunnel?.width ?? 0,
+            tunnelTableClientWidth: tunnelTable?.clientWidth ?? 0,
+            tunnelTableScrollWidth: tunnelTable?.scrollWidth ?? 0,
+          };
+        });
+        expect(sshLayout.profileWidth, "SSH profile panel should read as a compact side panel").toBeLessThanOrEqual(
+          380,
+        );
+        expect(sshLayout.profileWidth, "SSH tunnel panel should receive the main workspace width").toBeLessThan(
+          sshLayout.tunnelWidth,
+        );
+        expect(
+          sshLayout.tunnelTableScrollWidth,
+          "SSH tunnel table should fit without an internal horizontal scrollbar",
+        ).toBeLessThanOrEqual(sshLayout.tunnelTableClientWidth + 2);
+
+        await page.getByRole("button", { name: "添加 SSH 配置", exact: true }).click();
+        const profileDialog = await dialogMetrics(page);
+        await page.getByTitle("关闭弹框").click();
+        await page.getByRole("button", { name: "添加 SSH 隧道", exact: true }).click();
+        const tunnelDialog = await dialogMetrics(page);
+        expect(
+          Math.abs(profileDialog.centerX - tunnelDialog.centerX),
+          "SSH dialogs should share the same workspace center",
+        ).toBeLessThanOrEqual(2);
+        await page.getByTitle("关闭弹框").click();
+        await assertNoPageOverflow(page, `${viewport.name}:SSH dialog alignment`);
+      }
+
       await page.getByRole("button", { name: "网络转发", exact: true }).click();
-      await page.getByRole("button", { name: "日志" }).first().click();
+      await page.getByRole("button", { name: "更多操作" }).first().click();
+      await page.getByRole("menuitem", { name: "日志" }).click();
       await page.getByRole("button", { name: "详情" }).first().click();
       await expect(page.getByText("完整 meta JSON")).toBeVisible();
       await assertNoPageOverflow(page, `${viewport.name}:配置日志详情`);
@@ -94,4 +160,16 @@ async function assertNoPageOverflow(page: Page, label: string) {
     metrics.viewportWidth + 2,
   );
   expect(metrics.offenders, `${label} visible elements overflow viewport`).toEqual([]);
+}
+
+async function dialogMetrics(page: Page) {
+  return page.getByRole("dialog").evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      width: rect.width,
+      height: rect.height,
+    };
+  });
 }

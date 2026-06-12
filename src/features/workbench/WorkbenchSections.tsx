@@ -3,13 +3,16 @@
  * Workbench 服务、工具服务和 SSH 页面展示组件。
  */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  Ellipsis,
   FileText,
   FolderOpen,
+  Link2,
   Loader2,
   Maximize2,
   Pause,
@@ -53,6 +56,7 @@ import {
 } from "./WorkbenchPanels";
 import {
   knownHostModeLabels,
+  cx,
   newToolServiceRoute,
   normalizeDraftForPage,
   serviceKindsForPage,
@@ -408,6 +412,117 @@ function ToolRouteBodyDialog({
   );
 }
 
+interface MoreActionItem {
+  title: string;
+  icon: ReactNode;
+  onClick: () => void;
+  busy?: boolean;
+  danger?: boolean;
+}
+
+const moreActionMenuWidth = 184;
+const moreActionMenuPadding = 12;
+const moreActionMenuItemHeight = 36;
+
+function MoreActionMenu({ actions }: { actions: MoreActionItem[] }) {
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({ left: 0, top: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const placeMenu = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const estimatedHeight = moreActionMenuPadding + actions.length * moreActionMenuItemHeight;
+    const topBelow = rect.bottom + 6;
+    const top = topBelow + estimatedHeight > window.innerHeight
+      ? Math.max(8, rect.top - estimatedHeight - 6)
+      : topBelow;
+    const left = Math.max(8, Math.min(rect.right - moreActionMenuWidth, window.innerWidth - moreActionMenuWidth - 8));
+    setMenuStyle({ left, top, width: moreActionMenuWidth });
+  };
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    placeMenu();
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", placeMenu);
+    window.addEventListener("scroll", placeMenu, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", placeMenu);
+      window.removeEventListener("scroll", placeMenu, true);
+    };
+  }, [actions.length, open]);
+
+  const menu = open
+    ? createPortal(
+        <div className="action-menu-popover" ref={menuRef} role="menu" aria-label="更多操作" style={menuStyle}>
+          {actions.map((action) => (
+            <button
+              key={action.title}
+              type="button"
+              className={cx("action-menu-item", action.danger && "danger")}
+              role="menuitem"
+              title={action.title}
+              disabled={action.busy}
+              onClick={() => {
+                setOpen(false);
+                action.onClick();
+              }}
+            >
+              {action.busy ? <Loader2 size={15} className="spin" /> : action.icon}
+              <span>{action.title}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="icon-button action-menu-trigger"
+        title="更多操作"
+        aria-label="更多操作"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => {
+          if (!open) {
+            placeMenu();
+          }
+          setOpen((current) => !current);
+        }}
+      >
+        <Ellipsis size={16} />
+      </button>
+      {menu}
+    </>
+  );
+}
+
 function ToolServiceList({
   services,
   busy,
@@ -456,10 +571,10 @@ function ToolServiceList({
                 <small>{staticDetail}</small>
               </div>
             </div>
-            <div className="icon-row tool-service-actions">
+            <div className="icon-row tool-service-actions action-row">
               <StatusPill status={service.runtimeStatus} />
               <IconButton title="复制地址" busy={false} onClick={() => onCopyAddress(service)}>
-                <Copy size={15} />
+                <Link2 size={15} />
               </IconButton>
               <IconButton title={running ? "暂停服务" : "启动服务"} busy={toggleBusy} onClick={() => onToggle(service)}>
                 {running ? <Pause size={15} /> : <Play size={15} />}
@@ -467,9 +582,17 @@ function ToolServiceList({
               <IconButton title="编辑配置" busy={busy === `edit-tool:${service.id}`} onClick={() => onEdit(service.id)}>
                 <Pencil size={15} />
               </IconButton>
-              <IconButton title="删除服务" danger busy={busy === `delete-tool:${service.id}`} onClick={() => onDelete(service.id)}>
-                <Trash2 size={15} />
-              </IconButton>
+              <MoreActionMenu
+                actions={[
+                  {
+                    title: "删除服务",
+                    icon: <Trash2 size={15} />,
+                    danger: true,
+                    busy: busy === `delete-tool:${service.id}`,
+                    onClick: () => onDelete(service.id),
+                  },
+                ]}
+              />
             </div>
           </div>
         );
@@ -979,17 +1102,47 @@ function ServiceTable({ services, busy, onAction, onCopyAddress, onEdit, onLogs 
                 <td data-label="状态"><StatusPill status={service.runtimeStatus} /></td>
                 <td data-label="连接">{service.activeConnections}/{service.totalConnections}</td>
                 <td data-label="操作">
-                  <div className="icon-row">
+                  <div className="icon-row action-row">
                     <IconButton title={running ? "暂停" : "启动"} busy={busy === `${toggleAction}:${service.id}`} onClick={() => onAction(service.id, toggleAction)}>
                       {running ? <Pause size={15} /> : <Play size={15} />}
                     </IconButton>
-                    <IconButton title="重启" busy={busy === `restart:${service.id}`} onClick={() => onAction(service.id, "restart")}><RotateCcw size={15} /></IconButton>
-                    <IconButton title="测试" busy={busy === `test:${service.id}`} onClick={() => onAction(service.id, "test")}><CheckCircle2 size={15} /></IconButton>
-                    <IconButton title="复制地址" busy={false} onClick={() => onCopyAddress(service)}><Copy size={15} /></IconButton>
+                    <IconButton title="复制地址" busy={false} onClick={() => onCopyAddress(service)}><Link2 size={15} /></IconButton>
                     {onEdit && <IconButton title="编辑" busy={busy === `edit:${service.id}`} onClick={() => onEdit(service.id)}><Pencil size={15} /></IconButton>}
-                    <IconButton title="日志" busy={busy === `logs:${service.id}`} onClick={() => onLogs(service)}><ClipboardList size={15} /></IconButton>
-                    <IconButton title="复制配置" busy={busy === `duplicate:${service.id}`} onClick={() => onAction(service.id, "duplicate")}><Copy size={15} /></IconButton>
-                    <IconButton title="删除" danger busy={busy === `delete:${service.id}`} onClick={() => onAction(service.id, "delete")}><Trash2 size={15} /></IconButton>
+                    <MoreActionMenu
+                      actions={[
+                        {
+                          title: "重启",
+                          icon: <RotateCcw size={15} />,
+                          busy: busy === `restart:${service.id}`,
+                          onClick: () => onAction(service.id, "restart"),
+                        },
+                        {
+                          title: "测试",
+                          icon: <CheckCircle2 size={15} />,
+                          busy: busy === `test:${service.id}`,
+                          onClick: () => onAction(service.id, "test"),
+                        },
+                        {
+                          title: "日志",
+                          icon: <ClipboardList size={15} />,
+                          busy: busy === `logs:${service.id}`,
+                          onClick: () => onLogs(service),
+                        },
+                        {
+                          title: "复制配置",
+                          icon: <Copy size={15} />,
+                          busy: busy === `duplicate:${service.id}`,
+                          onClick: () => onAction(service.id, "duplicate"),
+                        },
+                        {
+                          title: "删除",
+                          icon: <Trash2 size={15} />,
+                          danger: true,
+                          busy: busy === `delete:${service.id}`,
+                          onClick: () => onAction(service.id, "delete"),
+                        },
+                      ]}
+                    />
                   </div>
                 </td>
               </tr>
@@ -1133,10 +1286,20 @@ function SshProfileList({ profiles, busy, onAction }: SshProfileListProps) {
             <strong>{profile.name}</strong>
             <small>{profile.username}@{profile.host}:{profile.port} · {sshAuthLabels[profile.authType]} · {sshJumpLabel(profile, profiles)}</small>
           </div>
-          <div className="icon-row">
+          <div className="icon-row ssh-profile-actions action-row">
             <IconButton title="测试 SSH" busy={busy === `test-ssh:${profile.id}`} onClick={() => onAction(profile.id, "test")}><CheckCircle2 size={15} /></IconButton>
             <IconButton title="编辑 SSH" busy={busy === `edit-ssh:${profile.id}`} onClick={() => onAction(profile.id, "edit")}><Pencil size={15} /></IconButton>
-            <IconButton title="删除 SSH" danger busy={busy === `delete-ssh:${profile.id}`} onClick={() => onAction(profile.id, "delete")}><Trash2 size={15} /></IconButton>
+            <MoreActionMenu
+              actions={[
+                {
+                  title: "删除 SSH",
+                  icon: <Trash2 size={15} />,
+                  danger: true,
+                  busy: busy === `delete-ssh:${profile.id}`,
+                  onClick: () => onAction(profile.id, "delete"),
+                },
+              ]}
+            />
           </div>
         </div>
       ))}

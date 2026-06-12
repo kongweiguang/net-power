@@ -4,7 +4,7 @@
  */
 
 @media (max-width: 1180px) {
-.two-column,
+  .two-column,
   .ssh-workbench,
   .system-proxy-layout {
     grid-template-columns: 1fr;
@@ -12,6 +12,10 @@
 
   .tool-service-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .system-proxy-workspace {
+    grid-template-columns: 1fr;
   }
 
   .tool-service-cell:nth-child(2n) {
@@ -45,6 +49,8 @@
     overflow-x: visible;
     padding: 12px;
     box-shadow: var(--mobile-sidebar-shadow);
+    backdrop-filter: saturate(1.8) blur(24px);
+    -webkit-backdrop-filter: saturate(1.8) blur(24px);
   }
 
   .system-titlebar {
@@ -68,6 +74,8 @@
 
   .brand {
     flex: 0 0 auto;
+    min-height: auto;
+    padding: 6px 10px;
     border-bottom: 0;
   }
 
@@ -77,16 +85,29 @@
     min-width: 0;
     flex: 1 1 420px;
     flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
   }
 
-  .nav-group {
+  .nav-section {
     display: flex;
     flex: 0 1 auto;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 6px;
   }
 
-  .nav-group-bottom {
+  .nav-section-label {
+    display: none;
+  }
+
+  .nav-section-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .nav-section-bottom {
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
@@ -94,6 +115,18 @@
 
   .nav-item {
     width: auto;
+    min-height: 38px;
+    padding: 6px 18px 6px 7px;
+  }
+
+  .nav-item-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 9px;
+  }
+
+  .nav-item.active::after {
+    right: 8px;
   }
 
   .filter-bar .ghost-button {
@@ -188,6 +221,14 @@
     flex-direction: column;
   }
 
+  .topbar {
+    gap: 10px;
+  }
+
+  .topbar h1 {
+    font-size: 24px;
+  }
+
   .setting-row-action {
     width: 100%;
     min-width: 0;
@@ -206,7 +247,12 @@
 
   .nav-item {
     flex: 1 1 calc(50% - 6px);
-    justify-content: center;
+    justify-content: flex-start;
+  }
+
+  .nav-section,
+  .nav-section-list {
+    flex: 1 1 100%;
   }
 
   .form-grid,
@@ -276,6 +322,26 @@
     justify-content: flex-start;
   }
 
+  .source-menu-list .source-row,
+  .system-proxy-detail-heading,
+  .system-proxy-detail-actions {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .source-row-meta {
+    justify-content: flex-start;
+  }
+
+  .system-proxy-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .system-proxy-detail-actions .primary-button {
+    width: 100%;
+  }
+
   .folder-picker {
     grid-template-columns: 1fr;
   }
@@ -289,9 +355,12 @@
     width: 100%;
   }
 
-  .system-proxy-status-strip,
-  .system-proxy-status-main {
+  .system-proxy-status-strip {
     align-items: stretch;
+  }
+
+  .system-proxy-status-main {
+    align-items: center;
   }
 
   .system-proxy-status-strip {

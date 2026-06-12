@@ -531,7 +531,7 @@ describe("Workbench", () => {
     expect(apiMocks.networkGetLanIp).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the same icon for copy address actions across service menus", async () => {
+  it("uses the link icon for copy address actions across service menus", async () => {
     const user = userEvent.setup();
     mockApis({
       services: [serviceSummary({ id: "svc-http", name: "Reverse Proxy" })],
@@ -542,10 +542,12 @@ describe("Workbench", () => {
 
     await screen.findByRole("heading", { name: "仪表盘" });
     await user.click(screen.getByRole("button", { name: "本地服务" }));
-    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-copy")).toBeInTheDocument();
+    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-link-2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "网络转发" }));
-    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-copy")).toBeInTheDocument();
+    expect((await screen.findByTitle("复制地址")).querySelector(".lucide-link-2")).toBeInTheDocument();
+    await user.click(await screen.findByTitle("更多操作"));
+    expect((await screen.findByTitle("复制配置")).querySelector(".lucide-copy")).toBeInTheDocument();
   });
 
   it("toggles persisted local HTTP services without deleting the saved config", async () => {
@@ -592,6 +594,7 @@ describe("Workbench", () => {
     render(<Workbench />);
 
     await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(await screen.findByTitle("更多操作"));
     await user.click(await screen.findByTitle("日志"));
     await waitFor(() =>
       expect(apiMocks.logsList).toHaveBeenCalledWith(expect.objectContaining({ serviceId: "svc-http", limit: 200 })),
@@ -654,7 +657,8 @@ describe("Workbench", () => {
     render(<Workbench />);
 
     await screen.findByRole("heading", { name: "仪表盘" });
-    await user.click(screen.getByRole("button", { name: "日志" }));
+    await user.click(await screen.findByTitle("更多操作"));
+    await user.click(screen.getByRole("menuitem", { name: "日志" }));
     await user.click(screen.getByRole("button", { name: "详情" }));
 
     const detail = screen.getByRole("heading", { name: "流量详情" }).closest("aside");
@@ -686,12 +690,17 @@ describe("Workbench", () => {
     await screen.findByRole("heading", { name: "仪表盘" });
     await user.click(screen.getByRole("button", { name: "系统代理" }));
     const sourcePanel = panelByHeading("代理配置列表");
-    expect(within(sourcePanel).getByText("Forward")).toBeInTheDocument();
-    const row = within(sourcePanel).getByText("Forward").closest(".source-row");
+    const sourceMenu = sourcePanel.querySelector(".source-menu-list");
+    if (!(sourceMenu instanceof HTMLElement)) {
+      throw new Error("找不到系统代理配置菜单");
+    }
+    const sourceButton = within(sourceMenu).getByRole("button", { name: /Forward/ });
+    expect(sourceButton).toBeInTheDocument();
+    const row = sourceButton.closest(".source-row");
     if (!row) {
       throw new Error("找不到 Forward 行");
     }
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "启动后启用代理" }));
+    await user.click(within(sourcePanel).getByRole("button", { name: "启动后启用代理" }));
 
     await waitFor(() => expect(apiMocks.servicesStart).toHaveBeenCalledWith("svc-forward"));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-forward"));
@@ -727,9 +736,53 @@ describe("Workbench", () => {
     }
     await user.click(within(row as HTMLElement).getByRole("button", { name: /Forward Alt/ }));
     expect(row).toHaveClass("selected");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "启用代理" }));
+    await user.click(within(panel).getByRole("button", { name: "启用代理" }));
 
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("svc-alt"));
+  });
+
+  it("keeps bypass empty after clearing and refreshing a disabled system proxy", async () => {
+    const user = userEvent.setup();
+    const activeStatus: SystemProxyStatus = {
+      enabled: true,
+      proxyHost: "127.0.0.1",
+      proxyPort: 7890,
+      bypass: "localhost;127.*",
+      message: "系统代理已开启",
+    };
+    const clearedStatus: SystemProxyStatus = {
+      enabled: false,
+      proxyHost: "",
+      proxyPort: null,
+      bypass: "",
+      message: "系统代理已清理",
+    };
+    const refreshedDisabledStatus: SystemProxyStatus = {
+      enabled: false,
+      proxyHost: "",
+      proxyPort: null,
+      bypass: "localhost;127.*",
+      message: "系统代理未开启",
+    };
+    mockApis({ proxyStatus: activeStatus });
+    apiMocks.proxyStatus.mockResolvedValueOnce(activeStatus).mockResolvedValue(refreshedDisabledStatus);
+    apiMocks.proxyClear.mockResolvedValue(clearedStatus);
+
+    render(<Workbench />);
+
+    await screen.findByRole("heading", { name: "仪表盘" });
+    await user.click(screen.getByRole("button", { name: "系统代理" }));
+    const panel = panelByHeading("代理配置列表");
+    expect(within(panel).getByText("localhost;127.*")).toBeInTheDocument();
+
+    await user.click(within(panel).getByRole("button", { name: "清理" }));
+    await waitFor(() => expect(apiMocks.proxyClear).toHaveBeenCalledTimes(1));
+    expect(within(panel).getByText("无绕过地址")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(apiMocks.proxyStatus).toHaveBeenCalledTimes(2));
+    expect(within(panel).getByText("无绕过地址")).toBeInTheDocument();
+    expect(within(panel).queryByText("localhost;127.*")).not.toBeInTheDocument();
   });
 
   it("creates, edits, uses and deletes system proxy profiles", async () => {
@@ -773,7 +826,8 @@ describe("Workbench", () => {
     if (!profileRow) {
       throw new Error("找不到系统代理配置行");
     }
-    await user.click(within(profileRow as HTMLElement).getByRole("button", { name: "启用代理" }));
+    await user.click(profileMainButton);
+    await user.click(within(panelByHeading("代理配置列表")).getByRole("button", { name: "启用代理" }));
     await waitFor(() => expect(apiMocks.proxySet).toHaveBeenCalledWith("proxy-profile-1"));
 
     await user.click(await screen.findByTitle("删除配置"));

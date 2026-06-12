@@ -113,14 +113,19 @@ export function SystemProxyPage({
           </button>
         </div>
         <SystemProxyStatusStrip status={status} busy={busy} onClear={onClear} />
-        <SystemProxySourceList
-          sources={sources}
-          selectedSourceKey={resolvedSelectedKey}
-          onSelect={onSelectedSourceChange}
-          busy={busy}
-          onUse={onUseSource}
-          onProfileAction={onProfileAction}
-        />
+        <div className="system-proxy-workspace">
+          <SystemProxySourceList
+            sources={sources}
+            selectedSourceKey={resolvedSelectedKey}
+            onSelect={onSelectedSourceChange}
+          />
+          <SystemProxySourceDetail
+            source={selectedSource}
+            busy={busy}
+            onUse={onUseSource}
+            onProfileAction={onProfileAction}
+          />
+        </div>
         <DialogShell
           open={profileDialogOpen}
           title={editingProfileId ? "编辑系统代理配置" : "添加系统代理配置"}
@@ -150,21 +155,26 @@ function SystemProxyStatusStrip({
   busy: string | null;
   onClear: () => void;
 }) {
+  const target = status.enabled && status.proxyHost && status.proxyPort !== null
+    ? `${status.proxyHost}:${status.proxyPort}`
+    : "未设置";
+  const bypass = status.enabled && status.bypass ? status.bypass : "无绕过地址";
+
   return (
     <div className={cx("system-proxy-status-strip", status.enabled && "active")}>
       <div className="system-proxy-status-main">
-        <StatusIcon ok={status.enabled} />
+        <span className="system-proxy-status-dot" aria-hidden="true" />
         <div>
-          <strong>{status.enabled ? "系统代理已开启" : "系统代理未开启"}</strong>
+          <span className="system-proxy-status-kicker">系统代理</span>
+          <strong>{status.enabled ? "已开启" : "未开启"}</strong>
           <small>{status.message}</small>
         </div>
       </div>
       <dl className="system-proxy-status-details">
-        <div><dt>主机</dt><dd>{status.proxyHost || "-"}</dd></div>
-        <div><dt>端口</dt><dd>{status.proxyPort ?? "-"}</dd></div>
-        <div><dt>绕过</dt><dd>{status.bypass || "-"}</dd></div>
+        <div><dt>目标</dt><dd>{target}</dd></div>
+        <div><dt>绕过</dt><dd>{bypass}</dd></div>
       </dl>
-      <button type="button" className="danger-button" disabled={busy === "system-proxy-clear"} onClick={onClear}>
+      <button type="button" className="ghost-button system-proxy-clear-button" disabled={busy === "system-proxy-clear"} onClick={onClear}>
         {busy === "system-proxy-clear" ? <Loader2 size={16} className="spin" /> : <XCircle size={16} />}
         清理
       </button>
@@ -235,51 +245,103 @@ function SystemProxySourceList({
   sources,
   selectedSourceKey,
   onSelect,
-  busy,
-  onUse,
-  onProfileAction,
 }: {
   sources: SystemProxySource[];
   selectedSourceKey: string;
   onSelect: (key: string) => void;
-  busy: string | null;
-  onUse: (key: string) => void;
-  onProfileAction: (id: string, action: "edit" | "delete") => void;
 }) {
   if (sources.length === 0) {
     return <EmptyState title="暂无代理配置" detail="点击添加配置后，就可以从列表里启用系统代理。" />;
   }
   return (
-    <div className="compact-list">
+    <div className="compact-list source-menu-list">
       {sources.map((source) => {
         const isService = source.type === "service";
-        const isRunningService = isService && source.service.runtimeStatus.type === "running";
-        const useBusy = busy === `use-system-proxy-source:${source.key}`;
         return (
           <div className={cx("compact-row source-row", selectedSourceKey === source.key && "selected")} key={source.key}>
             <button type="button" className="source-row-main" onClick={() => onSelect(source.key)}>
               <strong>{source.name}</strong>
               <small>{source.target} · {source.detail}</small>
             </button>
-            <div className="icon-row source-row-actions">
+            <div className="source-row-meta">
               {source.enabled && <span className="status-pill running">当前</span>}
               <span className="source-kind">{isService ? "服务" : "配置"}</span>
               {isService && <StatusPill status={source.service.runtimeStatus} />}
-              <button type="button" className="primary-button" disabled={useBusy} onClick={() => onUse(source.key)}>
-                {useBusy ? <Loader2 size={16} className="spin" /> : <ShieldCheck size={16} />}
-                {isService && !isRunningService ? "启动后启用代理" : "启用代理"}
-              </button>
-              {source.type === "profile" && (
-                <>
-                  <IconButton title="编辑配置" busy={busy === `edit-proxy-profile:${source.id}`} onClick={() => onProfileAction(source.id, "edit")}><Pencil size={15} /></IconButton>
-                  <IconButton title="删除配置" danger busy={busy === `delete-proxy-profile:${source.id}`} onClick={() => onProfileAction(source.id, "delete")}><Trash2 size={15} /></IconButton>
-                </>
-              )}
             </div>
           </div>
         );
       })}
     </div>
+  );
+}
+
+function SystemProxySourceDetail({
+  source,
+  busy,
+  onUse,
+  onProfileAction,
+}: {
+  source: SystemProxySource | null;
+  busy: string | null;
+  onUse: (key: string) => void;
+  onProfileAction: (id: string, action: "edit" | "delete") => void;
+}) {
+  if (!source) {
+    return <EmptyState title="暂无可用代理" detail="添加配置或启动 HTTP 正向代理后，就可以在这里启用系统代理。" />;
+  }
+
+  const isService = source.type === "service";
+  const isRunningService = isService && source.service.runtimeStatus.type === "running";
+  const useBusy = busy === `use-system-proxy-source:${source.key}`;
+  const bypass = source.type === "profile" ? source.profile.bypass || "-" : "跟随系统默认";
+  const statusLabel = source.enabled
+    ? "当前启用"
+    : isService
+      ? runtimeStatusLabels[source.service.runtimeStatus.type]
+      : "未启用";
+
+  return (
+    <aside className="system-proxy-detail" aria-label="系统代理配置详情">
+      <div className="system-proxy-detail-heading">
+        <div className="system-proxy-detail-title">
+          <span className="system-proxy-detail-icon">
+            {isService ? <Power size={18} /> : <FileText size={18} />}
+          </span>
+          <div>
+            <span className="source-kind">{isService ? "运行服务" : "保存配置"}</span>
+            <strong>{source.name}</strong>
+            <small>{source.enabled ? "当前系统代理目标" : "可切换为系统代理目标"}</small>
+          </div>
+        </div>
+        {source.enabled && <span className="status-pill running">当前</span>}
+      </div>
+      <dl className="system-proxy-detail-grid">
+        <div>
+          <dt>目标</dt>
+          <dd>{source.target}</dd>
+        </div>
+        <div>
+          <dt>状态</dt>
+          <dd>{statusLabel}</dd>
+        </div>
+        <div>
+          <dt>绕过</dt>
+          <dd>{bypass}</dd>
+        </div>
+      </dl>
+      <div className="system-proxy-detail-actions">
+        <button type="button" className="primary-button" disabled={useBusy} onClick={() => onUse(source.key)}>
+          {useBusy ? <Loader2 size={16} className="spin" /> : <ShieldCheck size={16} />}
+          {isService && !isRunningService ? "启动后启用代理" : source.enabled ? "重新应用" : "启用代理"}
+        </button>
+        {source.type === "profile" && (
+          <>
+            <IconButton title="编辑配置" busy={busy === `edit-proxy-profile:${source.id}`} onClick={() => onProfileAction(source.id, "edit")}><Pencil size={15} /></IconButton>
+            <IconButton title="删除配置" danger busy={busy === `delete-proxy-profile:${source.id}`} onClick={() => onProfileAction(source.id, "delete")}><Trash2 size={15} /></IconButton>
+          </>
+        )}
+      </div>
+    </aside>
   );
 }
 
